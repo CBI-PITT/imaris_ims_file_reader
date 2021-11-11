@@ -11,6 +11,7 @@ import h5py
 import numpy as np
 
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
+from skimage.transform import rescale
 
 
 
@@ -412,6 +413,45 @@ class IMS:
             image = self.dtypeImgConvert(image)
         
         return image.squeeze()
+    
+    
+    def getVolumeAtSpecificResolution(self,output_resolution=(100,100,100),time_point=0,channel=0,anti_aliasing=True):
+        '''
+        This function will enable the user to select the specific resolution of a volume
+        to be extracted by designating a tuple for output_resolution=(x,y,z).  This will extract the whole 
+        volume at the highest resolution level without going below the designated resolution
+        in any axis.  The volume will then be resized to the specified reolution by using
+        the skimage rescale function.
+        
+        
+        
+        The option to turn off anti_aliasing during skimage.rescale (anti_aliasing=False) is provided.
+        anti_aliasing can be very time consuming when extracting large resolutions
+        '''
+        
+        #Find ResolutionLevel that is closest in size but larger
+        resolutionLevelToExtract = 0
+        for res in range(self.ResolutionLevels):
+            currentResolution = self.metaData[res,time_point,channel,'resolution']
+            resCompare = [x <= y for x,y in zip(currentResolution,output_resolution)]
+            resEqual = [x == y for x,y in zip(currentResolution,self.resolution)]
+            # print(resCompare)
+            # print(resEqual)
+            #if all(resCompare) == True or (currentResolution[0]==self.resolution[0] and all(resCompare[1::]) == True):
+            if all(resCompare) == True or (all(resCompare) == False and any(resEqual) == True):
+                resolutionLevelToExtract = res
+        
+        workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
+        print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
+        workingVolume = self[resolutionLevelToExtract,time_point,channel,:,:,:]
+        
+        print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
+        rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
+        print('Rescale Factor = {}'.format(rescaleFactor))
+        
+        workingVolume = rescale(workingVolume, rescaleFactor, anti_aliasing=anti_aliasing)
+        
+        return self.dtypeImgConvert(workingVolume)
 
 
 
