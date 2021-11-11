@@ -37,7 +37,7 @@ class IMS:
         self.memCache = {}
         self.cacheFiles = []
         self.metaData = {}
-        self.ResolutionLevelLock = ResolutionLevelLock
+        self.ResolutionLevelLock = 0 if ResolutionLevelLock is None else ResolutionLevelLock
 
         resolution_0 = self.dataset['ResolutionLevel 0']
         time_point_0 = resolution_0['TimePoint 0']
@@ -103,18 +103,23 @@ class IMS:
             self.metaData[r, t, c, 'dtype'] = self.hf[location_data].dtype
 
         if isinstance(self.ResolutionLevelLock, int):
-            
-            ## Pull information from the only required dataset at each resolution
-            ## which is time_point=0, channel=0
-            self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
-            self.ndim = len(self.shape)
-            self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
-            self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
-            self.resolution = self.metaData[self.ResolutionLevelLock, 0, 0, 'resolution']
-            self.dtype = self.metaData[self.ResolutionLevelLock, 0, 0, 'dtype']
+            self.change_resolution_lock(self.ResolutionLevelLock)
 
             # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
                 
+    
+    
+    def change_resolution_lock(self,ResolutionLevelLock):
+        ## Pull information from the only required dataset at each resolution
+        ## which is time_point=0, channel=0
+        self.ResolutionLevelLock = ResolutionLevelLock
+        self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
+        self.ndim = len(self.shape)
+        self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
+        self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
+        self.resolution = self.metaData[self.ResolutionLevelLock, 0, 0, 'resolution']
+        self.dtype = self.metaData[self.ResolutionLevelLock, 0, 0, 'dtype']
+        
     # def __enter__(self):
     #     print('Opening file: {}'.format(self.filePathComplete))
     #     self.hf = h5py.File(self.filePathComplete, 'r')
