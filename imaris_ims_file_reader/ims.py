@@ -134,7 +134,7 @@ class IMS:
         print('Opening file: {} \n'.format(self.filePathComplete))
         self.hf = h5py.File(self.filePathComplete, 'r',swmr=True)
         self.dataset = self.hf['DataSet']
-        print('OPENED file: {} \n'.format(self.filePathComplete))
+        # print('OPENED file: {} \n'.format(self.filePathComplete))
     
     def __del__(self):
         self.close()
@@ -146,7 +146,7 @@ class IMS:
             self.hf.close()
         self.hf = None
         self.dataset = None
-        print('CLOSED file: {} \n'.format(self.filePathComplete))
+        # print('CLOSED file: {} \n'.format(self.filePathComplete))
 
     def __getitem__(self, key):
         """
@@ -415,7 +415,7 @@ class IMS:
         return image.squeeze()
     
     
-    def getVolumeAtSpecificResolution(self,output_resolution=(100,100,100),time_point=0,channel=0,anti_aliasing=True):
+    def get_Volume_At_Specific_Resolution(self,output_resolution=(100,100,100),time_point=0,channel=0,anti_aliasing=True):
         '''
         This function extracts a  time_point and channel at a specific resolution.
         The function extracts the whole volume at the highest resolution_level without 
@@ -434,15 +434,12 @@ class IMS:
             currentResolution = self.metaData[res,time_point,channel,'resolution']
             resCompare = [x <= y for x,y in zip(currentResolution,output_resolution)]
             resEqual = [x == y for x,y in zip(currentResolution,self.resolution)]
-            # print(resCompare)
-            # print(resEqual)
-            #if all(resCompare) == True or (currentResolution[0]==self.resolution[0] and all(resCompare[1::]) == True):
             if all(resCompare) == True or (all(resCompare) == False and any(resEqual) == True):
                 resolutionLevelToExtract = res
         
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
         print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
-        workingVolume = self.getResolutionLevel(resolutionLevelToExtract,time_point=0,channel=0)
+        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=0,channel=0)
         
         print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
@@ -453,7 +450,7 @@ class IMS:
         return self.dtypeImgConvert(workingVolume)
 
 
-    def getResolutionLevel(self,resolution_level,time_point=0,channel=0):
+    def get_Resolution_Level(self,resolution_level,time_point=0,channel=0):
         return self[resolution_level,time_point,channel,:,:,:]
 
 
