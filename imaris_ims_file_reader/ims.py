@@ -9,6 +9,11 @@ import sys
 
 import h5py
 import numpy as np
+
+from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
+
+
+
 from psutil import virtual_memory
 
 
@@ -293,7 +298,7 @@ class IMS:
         y_size = len(range(self.metaData[(r, 0, 0, 'shape')][-2])[y])
         x_size = len(range(self.metaData[(r, 0, 0, 'shape')][-1])[x])
 
-        output_array = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size))
+        output_array = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
 
         for idxt, t in enumerate(t_size):
             for idxc, c in enumerate(c_size):
@@ -329,3 +334,91 @@ class IMS:
             return output_array
         else:
             return np.squeeze(output_array)
+
+
+
+    
+    def dtypeImgConvert(self, image):
+        '''
+        Convert any numpy image to the dtype of the origional ims file
+        '''
+        if self.dtype == float or self.dtype == np.float32:
+            return img_as_float32(image)
+        elif self.dtype == np.uint16:
+            return img_as_uint(image)
+        elif self.dtype == np.uint8:
+            return img_as_ubyte(image)
+        
+        
+        
+    def projection(self,projection_type,time_point=None,channel=None,z=None,y=None,x=None,resolution_level=0):
+        ''' Create a min or max projection accross a specified (time_point,channel,z,y,x) space.
+        
+        projection_type = STR: 'min', 'max', 'mean',
+        time_point = INT,
+        channel = INT, 
+        z = tuple (zStart, zStop), 
+        y = None or (yStart,yStop), 
+        z = None or (xStart,xStop)
+        resolution_level = INT >=0 : 0 is the highest resolution
+        '''
+        
+        assert projection_type == 'max' or projection_type == 'min' or projection_type == 'mean'
+        
+        # Set defaults
+        resolution_level = 0 if resolution_level == None else resolution_level
+        time_point = 0 if time_point == None else time_point
+        channel = 0 if channel == None else channel
+        
+        if z is None:
+            z = range(self.metaData[(resolution_level,time_point,channel,'shape')][-3])
+        elif isinstance(z,tuple):
+            z = range(z[0],z[1],1)
+        
+        if y is None:
+            y = slice(0, self.metaData[(resolution_level,time_point,channel,'shape')][-2], 1)
+        elif isinstance(z,tuple):
+            y = slice(y[0],y[1],1)
+        
+        if x is None:
+            x = slice(0, self.metaData[(resolution_level,time_point,channel,'shape')][-1], 1)
+        elif isinstance(z,tuple):
+            x = slice(y[0],y[1],1)
+    
+        image = None    
+        for num,z_layer in enumerate(z):
+            
+            print('Reading layer ' + str(num) + ' of ' + str(z))
+            if image is None:
+                image = self[resolution_level,time_point,channel,z_layer,y,x]
+                print(image.dtype)
+                if projection_type == 'mean':
+                    image = img_as_float32(image)
+            else:
+                imageNew = self[resolution_level,time_point,channel,z_layer,y,x]
+                
+                print('Incoroprating layer ' + str(num) + ' of ' + str(z))
+                
+                if projection_type == 'max':
+                    image[:] = np.maximum(image,imageNew)
+                elif projection_type == 'min':
+                    image[:] = np.minimum(image,imageNew)
+                elif projection_type == 'mean':
+                    image[:] = image + img_as_float32(imageNew)
+        
+        if projection_type == 'mean':
+            image = image / len(z)
+            image = np.clip(image, 0, 1)
+            image = self.dtypeImgConvert(image)
+        
+        return image.squeeze()
+
+
+
+
+
+
+
+
+
+
