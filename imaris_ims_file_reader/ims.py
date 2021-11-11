@@ -453,6 +453,67 @@ class IMS:
     def get_Resolution_Level(self,resolution_level,time_point=0,channel=0):
         return self[resolution_level,time_point,channel,:,:,:]
 
+   
+    @staticmethod
+    def image_file_namer(resolution, time_point, channel, z_layer, prefix='', ext='.tif'):
+        if ext[0] != '.':
+            ext = '.' + ext
+        
+        if prefix == '':
+            form = '{}r{}_t{}_c{}_z{}{}'
+        else:
+            form = '{}_r{}_t{}_c{}_z{}{}'
+        
+        return form.format(
+            prefix,
+            str(resolution).zfill(2),
+            str(time_point).zfill(2),
+            str(channel).zfill(2),
+            str(z_layer).zfill(4),
+            ext
+            )
+
+    def save_Tiff_Series(self, location=None, time_points=(), channels=(), resolutionLevel=0, cropYX=(), overwrite = False):
+        
+        
+        assert isinstance(channels,tuple)
+        assert isinstance(resolutionLevel,int)
+        assert isinstance(cropYX,tuple)
+        assert isinstance(overwrite,bool)
+        assert (location is None) or isinstance(location,str)
+        
+        if location is None:
+            location = os.path.join(self.filePathBase,'{}_tiffSeries'.format(self.fileName))
+        
+        if os.path.exists(location) == False:
+            os.makedirs(location, exist_ok=False)
+        elif os.path.exists(location) == True and overwrite == True:
+            os.makedirs(location, exist_ok=True)
+        elif os.path.exists(location) == True and overwrite == False:
+            raise Exception("tiffSeries path already exists:  If you want to overwite the existing data, designate overwrite=True")
+        
+        
+        if time_points == ():
+            time_points = tuple(range(self.TimePoints))
+        if channels == ():
+            channels = tuple(range(self.Channels))
+        
+        if cropYX == ():
+            cropYX = (
+                0,self.metaData[(resolutionLevel,0,0,'shape')][-2],
+                0,self.metaData[(resolutionLevel,0,0,'shape')][-1]
+                )
+        
+        for time in time_points:
+            for color in channels:
+                for layer in range(self.metaData[(resolutionLevel,0,0,'shape')][-3]):
+                    fileName = os.path.join(location,self.image_file_namer(resolutionLevel,time,color,layer,prefix='', ext='.tif'))
+                    if os.path.exists(fileName):
+                        print('Skipping {} becasue it already exists'.format(fileName))
+                        continue
+                    array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    print('Saving: {}'.format(fileName))
+                    io.imsave(fileName, array)
 
 
 
