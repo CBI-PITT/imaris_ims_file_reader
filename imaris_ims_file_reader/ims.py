@@ -417,16 +417,15 @@ class IMS:
     
     def getVolumeAtSpecificResolution(self,output_resolution=(100,100,100),time_point=0,channel=0,anti_aliasing=True):
         '''
-        This function will enable the user to select the specific resolution of a volume
-        to be extracted by designating a tuple for output_resolution=(x,y,z).  This will extract the whole 
-        volume at the highest resolution level without going below the designated resolution
-        in any axis.  The volume will then be resized to the specified reolution by using
-        the skimage rescale function.
-        
-        
+        This function extracts a  time_point and channel at a specific resolution.
+        The function extracts the whole volume at the highest resolution_level without 
+        going below the designated output_resolution.  It then resizes to the volume 
+        to the specified resolution by using the skimage rescale function.
         
         The option to turn off anti_aliasing during skimage.rescale (anti_aliasing=False) is provided.
-        anti_aliasing can be very time consuming when extracting large resolutions
+        anti_aliasing can be very time consuming when extracting large resolutions.
+        
+        Everything is completed in RAM, very high resolutions may cause a crash.
         '''
         
         #Find ResolutionLevel that is closest in size but larger
@@ -443,7 +442,7 @@ class IMS:
         
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
         print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
-        workingVolume = self[resolutionLevelToExtract,time_point,channel,:,:,:]
+        workingVolume = self.getResolutionLevel(resolutionLevelToExtract,time_point=0,channel=0)
         
         print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
@@ -454,7 +453,8 @@ class IMS:
         return self.dtypeImgConvert(workingVolume)
 
 
-
+    def getResolutionLevel(self,resolution_level,time_point=0,channel=0):
+        return self[resolution_level,time_point,channel,:,:,:]
 
 
 
