@@ -83,8 +83,8 @@ class IMS:
 
             # Collect attribute info
             self.metaData[r, t, c, 'shape'] = (
-                t + 1,
-                c + 1,
+                1,
+                1,
                 int(self.read_attribute(location_attr, 'ImageSizeZ')),
                 int(self.read_attribute(location_attr, 'ImageSizeY')),
                 int(self.read_attribute(location_attr, 'ImageSizeX'))
@@ -103,12 +103,15 @@ class IMS:
             self.metaData[r, t, c, 'dtype'] = self.hf[location_data].dtype
 
         if isinstance(self.ResolutionLevelLock, int):
-            self.shape = self.metaData[self.ResolutionLevelLock, t, c, 'shape']
+            
+            ## Pull information from the only required dataset at each resolution
+            ## which is time_point=0, channel=0
+            self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
             self.ndim = len(self.shape)
-            self.chunks = self.metaData[self.ResolutionLevelLock, t, c, 'chunks']
-            self.shapeH5Array = self.metaData[self.ResolutionLevelLock, t, c, 'shapeH5Array']
-            self.resolution = self.metaData[self.ResolutionLevelLock, t, c, 'resolution']
-            self.dtype = self.metaData[self.ResolutionLevelLock, t, c, 'dtype']
+            self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
+            self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
+            self.resolution = self.metaData[self.ResolutionLevelLock, 0, 0, 'resolution']
+            self.dtype = self.metaData[self.ResolutionLevelLock, 0, 0, 'dtype']
 
             # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
                 
