@@ -23,6 +23,7 @@ class IMS:
         ## NOTE: Caching is currently not implemented.  
         
         self.filePathComplete = file
+        self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
         self.fileExtension = os.path.splitext(self.fileName)[1]
@@ -38,70 +39,68 @@ class IMS:
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
 
-        with h5py.File(file, 'r') as hf:
-            data_set = hf['DataSet']
-            resolution_0 = data_set['ResolutionLevel 0']
-            time_point_0 = resolution_0['TimePoint 0']
-            channel_0 = time_point_0['Channel 0']
-            data = channel_0['Data']
+        resolution_0 = self.dataset['ResolutionLevel 0']
+        time_point_0 = resolution_0['TimePoint 0']
+        channel_0 = time_point_0['Channel 0']
+        data = channel_0['Data']
 
-            self.ResolutionLevels = len(data_set)
-            self.TimePoints = len(resolution_0)
-            self.Channels = len(time_point_0)
+        self.ResolutionLevels = len(self.dataset)
+        self.TimePoints = len(resolution_0)
+        self.Channels = len(time_point_0)
 
-            self.resolution = (
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
-                    / self.read_numerical_dataset_attr('Z'),
-                    3),
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
-                    / self.read_numerical_dataset_attr('Y'),
-                    3),
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
-                    / self.read_numerical_dataset_attr('X'),
-                    3)
+        self.resolution = (
+            round(
+                (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
+                / self.read_numerical_dataset_attr('Z'),
+                3),
+            round(
+                (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
+                / self.read_numerical_dataset_attr('Y'),
+                3),
+            round(
+                (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
+                / self.read_numerical_dataset_attr('X'),
+                3)
+        )
+
+        self.shape = (
+            self.TimePoints,
+            self.Channels,
+            int(self.read_attribute('DataSetInfo/Image', 'Z')),
+            int(self.read_attribute('DataSetInfo/Image', 'Y')),
+            int(self.read_attribute('DataSetInfo/Image', 'X'))
+        )
+
+        self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
+        self.ndim = len(self.shape)
+        self.dtype = data.dtype
+        self.shapeH5Array = data.shape
+
+        for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
+                                         range(self.Channels)):
+            location_attr = self.location_generator(r, t, c, data='attrib')
+            location_data = self.location_generator(r, t, c, data='data')
+
+            # Collect attribute info
+            self.metaData[r, t, c, 'shape'] = (
+                t + 1,
+                c + 1,
+                int(self.read_attribute(location_attr, 'ImageSizeZ')),
+                int(self.read_attribute(location_attr, 'ImageSizeY')),
+                int(self.read_attribute(location_attr, 'ImageSizeX'))
             )
-
-            self.shape = (
-                self.TimePoints,
-                self.Channels,
-                int(self.read_attribute('DataSetInfo/Image', 'Z')),
-                int(self.read_attribute('DataSetInfo/Image', 'Y')),
-                int(self.read_attribute('DataSetInfo/Image', 'X'))
+            self.metaData[r, t, c, 'resolution'] = tuple(
+                [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
+                 zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
             )
+            self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
+            self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
 
-            self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
-            self.ndim = len(self.shape)
-            self.dtype = data.dtype
-            self.shapeH5Array = data.shape
-
-            for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
-                                             range(self.Channels)):
-                location_attr = self.location_generator(r, t, c, data='attrib')
-                location_data = self.location_generator(r, t, c, data='data')
-
-                # Collect attribute info
-                self.metaData[r, t, c, 'shape'] = (
-                    t + 1,
-                    c + 1,
-                    int(self.read_attribute(location_attr, 'ImageSizeZ')),
-                    int(self.read_attribute(location_attr, 'ImageSizeY')),
-                    int(self.read_attribute(location_attr, 'ImageSizeX'))
-                )
-                self.metaData[r, t, c, 'resolution'] = tuple(
-                    [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
-                     zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
-                )
-                self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
-                self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
-
-                # Collect dataset info
-                self.metaData[r, t, c, 'chunks'] = (
-                1, 1, hf[location_data].chunks[0], hf[location_data].chunks[1], hf[location_data].chunks[2])
-                self.metaData[r, t, c, 'shapeH5Array'] = hf[location_data].shape
-                self.metaData[r, t, c, 'dtype'] = hf[location_data].dtype
+            # Collect dataset info
+            self.metaData[r, t, c, 'chunks'] = (
+            1, 1, self.hf[location_data].chunks[0], self.hf[location_data].chunks[1], self.hf[location_data].chunks[2])
+            self.metaData[r, t, c, 'shapeH5Array'] = self.hf[location_data].shape
+            self.metaData[r, t, c, 'dtype'] = self.hf[location_data].dtype
 
         if isinstance(self.ResolutionLevelLock, int):
             self.shape = self.metaData[self.ResolutionLevelLock, t, c, 'shape']
@@ -112,8 +111,6 @@ class IMS:
             self.dtype = self.metaData[self.ResolutionLevelLock, t, c, 'dtype']
 
             # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
-
-        self.open()
                 
     # def __enter__(self):
     #     print('Opening file: {}'.format(self.filePathComplete))
@@ -278,8 +275,7 @@ class IMS:
         attrib is a string that defines the attribute to extract: for example
         'ImageSizeX'
         """
-        with h5py.File(self.filePathComplete, 'r') as hf:
-            return str(hf[location].attrs[attrib], encoding='ascii')
+        return str(self.hf[location].attrs[attrib], encoding='ascii')
 
     def get_slice(self, r, t, c, z, y, x):
         """
