@@ -13,7 +13,12 @@ from psutil import virtual_memory
 
 
 class IMS:
-    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=20, disk_size=2000):
+    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=None, disk_size=2000):
+        
+        ##  mem_size = in gigabytes that remain FREE as cache fills
+        ##  disk_size = in gigabytes that remain FREE as cache fills
+        ## NOTE: Caching is currently not implemented.  
+        
         self.filePathComplete = file
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -23,8 +28,8 @@ class IMS:
         else:
             self.cache = True
         self.cache_location = cache_location
-        self.disk_size = disk_size * 1e9
-        self.mem_size = mem_size * 1e9
+        self.disk_size = disk_size * 1e9 if disk_size is not None else None
+        self.mem_size = mem_size * 1e9 if mem_size is not None else None
         self.memCache = {}
         self.cacheFiles = []
         self.metaData = {}
@@ -104,6 +109,38 @@ class IMS:
             self.dtype = self.metaData[self.ResolutionLevelLock, t, c, 'dtype']
 
             # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
+        
+        
+        self.open()
+                
+    # def __enter__(self):
+    #     print('Opening file: {}'.format(self.filePathComplete))
+    #     self.hf = h5py.File(self.filePathComplete, 'r')
+    #     self.dataset = self.hf['DataSet']
+    
+    
+    # def __exit__(self, type, value, traceback):
+    #     ## Implement flush?
+    #     self.hf.close()
+    #     self.hf = None
+        
+    def open(self):
+        print('Opening file: {} \n'.format(self.filePathComplete))
+        self.hf = h5py.File(self.filePathComplete, 'r',swmr=True)
+        self.dataset = self.hf['DataSet']
+        print('OPENED file: {} \n'.format(self.filePathComplete))
+    
+    def __del__(self):
+        self.close()
+    
+    def close(self):
+        ## Implement flush?
+        print('Closing file: {} \n'.format(self.filePathComplete))
+        if self.hf is not None:
+            self.hf.close()
+        self.hf = None
+        self.dataset = None
+        print('CLOSED file: {} \n'.format(self.filePathComplete))
 
     def __getitem__(self, key):
         """
@@ -122,7 +159,6 @@ class IMS:
         This option enables a 5D slice to lock on to a specified resolution level.
         """
 
-        original_key = key
         res = self.ResolutionLevelLock
 
         if not isinstance(key, slice) and not isinstance(key, int) and len(key) == 6:
@@ -259,11 +295,18 @@ class IMS:
 
         output_array = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size))
 
-        with h5py.File(self.filePathComplete, 'r') as hf:
-            for idxt, t in enumerate(t_size):
-                for idxc, c in enumerate(c_size):
-                    d_set_string = self.location_generator(r, t, c, data='data')
-                    output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
+        for idxt, t in enumerate(t_size):
+            for idxc, c in enumerate(c_size):
+                ## Below method is faster than all others tried
+                d_set_string = self.location_generator(r,t,c,data='data')
+                self.hf[d_set_string].read_direct(output_array,np.s_[z,y,x], np.s_[idxt,idxc,:,:,:])
+                    
+        # with h5py.File(self.filePathComplete, 'r') as hf:
+        #     for idxt, t in enumerate(t_size):
+        #         for idxc, c in enumerate(c_size):
+        #             # Old method below
+        #             d_set_string = self.location_generator(r, t, c, data='data')
+        #             output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
 
         """
         Some issues here with the output of these arrays.  Napari sometimes expects
@@ -279,10 +322,10 @@ class IMS:
         Currently "NAPARI_ASYNC" = '1' is set to one in the image loader
         Currently File/Preferences/Render Images Asynchronously must be turned on for this plugin to work
         """
-        try:
-            if os.environ["NAPARI_ASYNC"] == '1':
-                return np.squeeze(output_array)
-        except KeyError:
-            pass
 
-        return output_array
+        if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
+            return output_array
+        elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+            return output_array
+        else:
+            return np.squeeze(output_array)
