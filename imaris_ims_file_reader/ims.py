@@ -16,7 +16,7 @@ from psutil import virtual_memory
 
 
 class IMS:
-    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=None, disk_size=2000):
+    def __init__(self, file, ResolutionLevelLock=0, cache_location=None, mem_size=None, disk_size=2000):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
@@ -37,7 +37,7 @@ class IMS:
         self.memCache = {}
         self.cacheFiles = []
         self.metaData = {}
-        self.ResolutionLevelLock = 0 if ResolutionLevelLock is None else ResolutionLevelLock
+        self.ResolutionLevelLock = ResolutionLevelLock
 
         resolution_0 = self.dataset['ResolutionLevel 0']
         time_point_0 = resolution_0['TimePoint 0']
@@ -72,7 +72,6 @@ class IMS:
         )
 
         self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
-        self.ndim = len(self.shape)
         self.dtype = data.dtype
         self.shapeH5Array = data.shape
 
@@ -104,8 +103,6 @@ class IMS:
 
         if isinstance(self.ResolutionLevelLock, int):
             self.change_resolution_lock(self.ResolutionLevelLock)
-
-            # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
                 
     
     
@@ -113,7 +110,13 @@ class IMS:
         ## Pull information from the only required dataset at each resolution
         ## which is time_point=0, channel=0
         self.ResolutionLevelLock = ResolutionLevelLock
-        self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
+        self.shape = (
+            self.TimePoints,
+            self.Channels,
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-3],
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-2],
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-1]
+        )
         self.ndim = len(self.shape)
         self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
         self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
