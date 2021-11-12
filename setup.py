@@ -1,8 +1,10 @@
 from setuptools import setup
 
-setup(
+# https://github.com/pypa/setuptools_scm
+use_scm = {"write_to": "imaris_ims_file_reader/_version.py"}
+
+setup(use_scm_version=use_scm,
     name='imaris_ims_file_reader',
-    version='0.1.1',
     description='Imaris *.ims file format',
     url='https://github.com/CBI-PITT/imaris_ims_file_reader',
     author='Alan M Watson',
