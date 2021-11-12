@@ -1,5 +1,6 @@
 import os
 from imaris_ims_file_reader import ims
+import numpy as np
 
 
 # tmp_path is a pytest fixture
