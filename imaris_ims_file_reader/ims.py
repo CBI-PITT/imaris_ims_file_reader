@@ -9,12 +9,21 @@ import sys
 
 import h5py
 import numpy as np
+
+from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
+from skimage.transform import rescale
 from psutil import virtual_memory
 
 
 class IMS:
-    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=20, disk_size=2000):
+    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=None, disk_size=2000):
+        
+        ##  mem_size = in gigabytes that remain FREE as cache fills
+        ##  disk_size = in gigabytes that remain FREE as cache fills
+        ## NOTE: Caching is currently not implemented.  
+        
         self.filePathComplete = file
+        self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
         self.fileExtension = os.path.splitext(self.fileName)[1]
@@ -23,87 +32,122 @@ class IMS:
         else:
             self.cache = True
         self.cache_location = cache_location
-        self.disk_size = disk_size * 1e9
-        self.mem_size = mem_size * 1e9
+        self.disk_size = disk_size * 1e9 if disk_size is not None else None
+        self.mem_size = mem_size * 1e9 if mem_size is not None else None
         self.memCache = {}
         self.cacheFiles = []
         self.metaData = {}
-        self.ResolutionLevelLock = ResolutionLevelLock
+        self.ResolutionLevelLock = 0 if ResolutionLevelLock is None else ResolutionLevelLock
 
-        with h5py.File(file, 'r') as hf:
-            data_set = hf['DataSet']
-            resolution_0 = data_set['ResolutionLevel 0']
-            time_point_0 = resolution_0['TimePoint 0']
-            channel_0 = time_point_0['Channel 0']
-            data = channel_0['Data']
+        resolution_0 = self.dataset['ResolutionLevel 0']
+        time_point_0 = resolution_0['TimePoint 0']
+        channel_0 = time_point_0['Channel 0']
+        data = channel_0['Data']
 
-            self.ResolutionLevels = len(data_set)
-            self.TimePoints = len(resolution_0)
-            self.Channels = len(time_point_0)
+        self.ResolutionLevels = len(self.dataset)
+        self.TimePoints = len(resolution_0)
+        self.Channels = len(time_point_0)
 
-            self.resolution = (
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
-                    / self.read_numerical_dataset_attr('Z'),
-                    3),
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
-                    / self.read_numerical_dataset_attr('Y'),
-                    3),
-                round(
-                    (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
-                    / self.read_numerical_dataset_attr('X'),
-                    3)
+        self.resolution = (
+            round(
+                (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
+                / self.read_numerical_dataset_attr('Z'),
+                3),
+            round(
+                (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
+                / self.read_numerical_dataset_attr('Y'),
+                3),
+            round(
+                (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
+                / self.read_numerical_dataset_attr('X'),
+                3)
+        )
+
+        self.shape = (
+            self.TimePoints,
+            self.Channels,
+            int(self.read_attribute('DataSetInfo/Image', 'Z')),
+            int(self.read_attribute('DataSetInfo/Image', 'Y')),
+            int(self.read_attribute('DataSetInfo/Image', 'X'))
+        )
+
+        self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
+        self.ndim = len(self.shape)
+        self.dtype = data.dtype
+        self.shapeH5Array = data.shape
+
+        for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
+                                         range(self.Channels)):
+            location_attr = self.location_generator(r, t, c, data='attrib')
+            location_data = self.location_generator(r, t, c, data='data')
+
+            # Collect attribute info
+            self.metaData[r, t, c, 'shape'] = (
+                1,
+                1,
+                int(self.read_attribute(location_attr, 'ImageSizeZ')),
+                int(self.read_attribute(location_attr, 'ImageSizeY')),
+                int(self.read_attribute(location_attr, 'ImageSizeX'))
             )
-
-            self.shape = (
-                self.TimePoints,
-                self.Channels,
-                int(self.read_attribute('DataSetInfo/Image', 'Z')),
-                int(self.read_attribute('DataSetInfo/Image', 'Y')),
-                int(self.read_attribute('DataSetInfo/Image', 'X'))
+            self.metaData[r, t, c, 'resolution'] = tuple(
+                [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
+                 zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
             )
+            self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
+            self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
 
-            self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
-            self.ndim = len(self.shape)
-            self.dtype = data.dtype
-            self.shapeH5Array = data.shape
-
-            for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
-                                             range(self.Channels)):
-                location_attr = self.location_generator(r, t, c, data='attrib')
-                location_data = self.location_generator(r, t, c, data='data')
-
-                # Collect attribute info
-                self.metaData[r, t, c, 'shape'] = (
-                    t + 1,
-                    c + 1,
-                    int(self.read_attribute(location_attr, 'ImageSizeZ')),
-                    int(self.read_attribute(location_attr, 'ImageSizeY')),
-                    int(self.read_attribute(location_attr, 'ImageSizeX'))
-                )
-                self.metaData[r, t, c, 'resolution'] = tuple(
-                    [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
-                     zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
-                )
-                self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
-                self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
-
-                # Collect dataset info
-                self.metaData[r, t, c, 'chunks'] = (
-                1, 1, hf[location_data].chunks[0], hf[location_data].chunks[1], hf[location_data].chunks[2])
-                self.metaData[r, t, c, 'shapeH5Array'] = hf[location_data].shape
-                self.metaData[r, t, c, 'dtype'] = hf[location_data].dtype
+            # Collect dataset info
+            self.metaData[r, t, c, 'chunks'] = (
+            1, 1, self.hf[location_data].chunks[0], self.hf[location_data].chunks[1], self.hf[location_data].chunks[2])
+            self.metaData[r, t, c, 'shapeH5Array'] = self.hf[location_data].shape
+            self.metaData[r, t, c, 'dtype'] = self.hf[location_data].dtype
 
         if isinstance(self.ResolutionLevelLock, int):
-            self.shape = self.metaData[self.ResolutionLevelLock, t, c, 'shape']
-            self.ndim = len(self.shape)
-            self.chunks = self.metaData[self.ResolutionLevelLock, t, c, 'chunks']
-            self.shapeH5Array = self.metaData[self.ResolutionLevelLock, t, c, 'shapeH5Array']
-            self.resolution = self.metaData[self.ResolutionLevelLock, t, c, 'resolution']
-            self.dtype = self.metaData[self.ResolutionLevelLock, t, c, 'dtype']
+            self.change_resolution_lock(self.ResolutionLevelLock)
 
             # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
+                
+    
+    
+    def change_resolution_lock(self,ResolutionLevelLock):
+        ## Pull information from the only required dataset at each resolution
+        ## which is time_point=0, channel=0
+        self.ResolutionLevelLock = ResolutionLevelLock
+        self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
+        self.ndim = len(self.shape)
+        self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
+        self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
+        self.resolution = self.metaData[self.ResolutionLevelLock, 0, 0, 'resolution']
+        self.dtype = self.metaData[self.ResolutionLevelLock, 0, 0, 'dtype']
+        
+    # def __enter__(self):
+    #     print('Opening file: {}'.format(self.filePathComplete))
+    #     self.hf = h5py.File(self.filePathComplete, 'r')
+    #     self.dataset = self.hf['DataSet']
+    
+    
+    # def __exit__(self, type, value, traceback):
+    #     ## Implement flush?
+    #     self.hf.close()
+    #     self.hf = None
+        
+    def open(self):
+        print('Opening file: {} \n'.format(self.filePathComplete))
+        self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
+        self.dataset = self.hf['DataSet']
+        # print('OPENED file: {} \n'.format(self.filePathComplete))
+    
+    def __del__(self):
+        self.close()
+    
+    def close(self):
+        ## Implement flush?
+        print('Closing file: {} \n'.format(self.filePathComplete))
+        if self.hf is not None:
+            self.hf.close()
+        self.hf = None
+        self.dataset = None
+        # print('CLOSED file: {} \n'.format(self.filePathComplete))
 
     def __getitem__(self, key):
         """
@@ -122,7 +166,6 @@ class IMS:
         This option enables a 5D slice to lock on to a specified resolution level.
         """
 
-        original_key = key
         res = self.ResolutionLevelLock
 
         if not isinstance(key, slice) and not isinstance(key, int) and len(key) == 6:
@@ -222,7 +265,7 @@ class IMS:
     @staticmethod
     def location_generator(r, t, c, data='data'):
         """
-        Given R, T, C, this funtion will generate a path to data in an imaris file
+        Given R, T, C, this function will generate a path to data in an imaris file
         default data == 'data' the path will reference with array of data
         if data == 'attrib' the bath will reference the channel location where attributes are stored
         """
@@ -240,8 +283,7 @@ class IMS:
         attrib is a string that defines the attribute to extract: for example
         'ImageSizeX'
         """
-        with h5py.File(self.filePathComplete, 'r') as hf:
-            return str(hf[location].attrs[attrib], encoding='ascii')
+        return str(self.hf[location].attrs[attrib], encoding='ascii')
 
     def get_slice(self, r, t, c, z, y, x):
         """
@@ -257,13 +299,20 @@ class IMS:
         y_size = len(range(self.metaData[(r, 0, 0, 'shape')][-2])[y])
         x_size = len(range(self.metaData[(r, 0, 0, 'shape')][-1])[x])
 
-        output_array = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size))
+        output_array = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
 
-        with h5py.File(self.filePathComplete, 'r') as hf:
-            for idxt, t in enumerate(t_size):
-                for idxc, c in enumerate(c_size):
-                    d_set_string = self.location_generator(r, t, c, data='data')
-                    output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
+        for idxt, t in enumerate(t_size):
+            for idxc, c in enumerate(c_size):
+                ## Below method is faster than all others tried
+                d_set_string = self.location_generator(r, t, c, data='data')
+                self.hf[d_set_string].read_direct(output_array, np.s_[z, y, x], np.s_[idxt, idxc, :, :, :])
+
+        # with h5py.File(self.filePathComplete, 'r') as hf:
+        #     for idxt, t in enumerate(t_size):
+        #         for idxc, c in enumerate(c_size):
+        #             # Old method below
+        #             d_set_string = self.location_generator(r, t, c, data='data')
+        #             output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
 
         """
         Some issues here with the output of these arrays.  Napari sometimes expects
@@ -279,10 +328,183 @@ class IMS:
         Currently "NAPARI_ASYNC" = '1' is set to one in the image loader
         Currently File/Preferences/Render Images Asynchronously must be turned on for this plugin to work
         """
-        try:
-            if os.environ["NAPARI_ASYNC"] == '1':
-                return np.squeeze(output_array)
-        except KeyError:
-            pass
 
-        return output_array
+        if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
+            return output_array
+        elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+            return output_array
+        else:
+            return np.squeeze(output_array)
+
+    def dtypeImgConvert(self, image):
+        """
+        Convert any numpy image to the dtype of the original ims file
+        """
+        if self.dtype == float or self.dtype == np.float32:
+            return img_as_float32(image)
+        elif self.dtype == np.uint16:
+            return img_as_uint(image)
+        elif self.dtype == np.uint8:
+            return img_as_ubyte(image)
+
+    def projection(self, projection_type,
+                   time_point=None, channel=None, z=None, y=None, x=None, resolution_level=0):
+        """ Create a min or max projection across a specified (time_point,channel,z,y,x) space.
+        
+        projection_type = STR: 'min', 'max', 'mean',
+        time_point = INT,
+        channel = INT, 
+        z = tuple (zStart, zStop), 
+        y = None or (yStart,yStop), 
+        z = None or (xStart,xStop)
+        resolution_level = INT >=0 : 0 is the highest resolution
+        """
+
+        assert projection_type == 'max' or projection_type == 'min' or projection_type == 'mean'
+        
+        # Set defaults
+        resolution_level = 0 if resolution_level == None else resolution_level
+        time_point = 0 if time_point == None else time_point
+        channel = 0 if channel == None else channel
+        
+        if z is None:
+            z = range(self.metaData[(resolution_level,time_point,channel,'shape')][-3])
+        elif isinstance(z, tuple):
+            z = range(z[0], z[1], 1)
+        
+        if y is None:
+            y = slice(0, self.metaData[(resolution_level,time_point,channel,'shape')][-2], 1)
+        elif isinstance(z, tuple):
+            y = slice(y[0], y[1], 1)
+
+        if x is None:
+            x = slice(0, self.metaData[(resolution_level,time_point,channel,'shape')][-1], 1)
+        elif isinstance(z, tuple):
+            x = slice(y[0], y[1], 1)
+    
+        image = None    
+        for num, z_layer in enumerate(z):
+            
+            print('Reading layer ' + str(num) + ' of ' + str(z))
+            if image is None:
+                image = self[resolution_level, time_point, channel, z_layer, y, x]
+                print(image.dtype)
+                if projection_type == 'mean':
+                    image = img_as_float32(image)
+            else:
+                imageNew = self[resolution_level, time_point, channel, z_layer, y, x]
+
+                print('Incoroprating layer ' + str(num) + ' of ' + str(z))
+
+                if projection_type == 'max':
+                    image[:] = np.maximum(image,imageNew)
+                elif projection_type == 'min':
+                    image[:] = np.minimum(image,imageNew)
+                elif projection_type == 'mean':
+                    image[:] = image + img_as_float32(imageNew)
+
+        if projection_type == 'mean':
+            image = image / len(z)
+            image = np.clip(image, 0, 1)
+            image = self.dtypeImgConvert(image)
+
+        return image.squeeze()
+
+    def get_Volume_At_Specific_Resolution(
+            self, output_resolution=(100, 100, 100), time_point=0, channel=0, anti_aliasing=True
+    ):
+        """
+        This function extracts a  time_point and channel at a specific resolution.
+        The function extracts the whole volume at the highest resolution_level without 
+        going below the designated output_resolution.  It then resizes to the volume 
+        to the specified resolution by using the skimage rescale function.
+        
+        The option to turn off anti_aliasing during skimage.rescale (anti_aliasing=False) is provided.
+        anti_aliasing can be very time consuming when extracting large resolutions.
+        
+        Everything is completed in RAM, very high resolutions may cause a crash.
+        """
+
+        # Find ResolutionLevel that is closest in size but larger
+        resolutionLevelToExtract = 0
+        for res in range(self.ResolutionLevels):
+            currentResolution = self.metaData[res,time_point,channel,'resolution']
+            resCompare = [x <= y for x,y in zip(currentResolution,output_resolution)]
+            resEqual = [x == y for x,y in zip(currentResolution,self.resolution)]
+            if all(resCompare) == True or (all(resCompare) == False and any(resEqual) == True):
+                resolutionLevelToExtract = res
+
+        workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
+        print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
+        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=0,channel=0)
+
+        print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
+        rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
+        print('Rescale Factor = {}'.format(rescaleFactor))
+
+        workingVolume = rescale(workingVolume, rescaleFactor, anti_aliasing=anti_aliasing)
+
+        return self.dtypeImgConvert(workingVolume)
+
+    def get_Resolution_Level(self, resolution_level, time_point=0, channel=0):
+        return self[resolution_level, time_point, channel, :, :, :]
+
+    @staticmethod
+    def image_file_namer(resolution, time_point, channel, z_layer, prefix='', ext='.tif'):
+        if ext[0] != '.':
+            ext = '.' + ext
+
+        if prefix == '':
+            form = '{}r{}_t{}_c{}_z{}{}'
+        else:
+            form = '{}_r{}_t{}_c{}_z{}{}'
+
+        return form.format(
+            prefix,
+            str(resolution).zfill(2),
+            str(time_point).zfill(2),
+            str(channel).zfill(2),
+            str(z_layer).zfill(4),
+            ext
+            )
+
+    def save_Tiff_Series(
+            self, location=None, time_points=(), channels=(), resolutionLevel=0, cropYX=(), overwrite=False
+    ):
+        assert isinstance(channels,tuple)
+        assert isinstance(resolutionLevel,int)
+        assert isinstance(cropYX,tuple)
+        assert isinstance(overwrite,bool)
+        assert (location is None) or isinstance(location,str)
+
+        if location is None:
+            location = os.path.join(self.filePathBase,'{}_tiffSeries'.format(self.fileName))
+
+        if os.path.exists(location) == False:
+            os.makedirs(location, exist_ok=False)
+        elif os.path.exists(location) == True and overwrite == True:
+            os.makedirs(location, exist_ok=True)
+        elif os.path.exists(location) == True and overwrite == False:
+            raise Exception("tiffSeries path already exists:  If you want to overwite the existing data, designate overwrite=True")
+
+        if time_points == ():
+            time_points = tuple(range(self.TimePoints))
+        if channels == ():
+            channels = tuple(range(self.Channels))
+
+        if cropYX == ():
+            cropYX = (
+                0, self.metaData[(resolutionLevel, 0, 0, 'shape')][-2],
+                0,self.metaData[(resolutionLevel, 0, 0, 'shape')][-1]
+            )
+
+        for time in time_points:
+            for color in channels:
+                for layer in range(self.metaData[(resolutionLevel,0,0,'shape')][-3]):
+                    fileName = os.path.join(location,self.image_file_namer(resolutionLevel,time,color,layer,prefix='', ext='.tif'))
+                    if os.path.exists(fileName):
+                        print('Skipping {} becasue it already exists'.format(fileName))
+                        continue
+                    array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    print('Saving: {}'.format(fileName))
+                    io.imsave(fileName, array)
