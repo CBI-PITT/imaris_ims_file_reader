@@ -1,10 +1,5 @@
-certifi==2021.10.8
-h5py==3.5.0
-numpy==1.21.3
-pbr==5.7.0
-psutil==5.8.0
-scikit-image==0.18.3
-stevedore==3.5.0
-virtualenv-clone==0.5.7
-virtualenvwrapper==4.8.4
+# The requirements listed here are for development. 
+# Requirements of the distribution should be listed in setup.cfg
+# See also: https://caremad.io/posts/2013/07/setup-vs-requirement/
+
 -e .

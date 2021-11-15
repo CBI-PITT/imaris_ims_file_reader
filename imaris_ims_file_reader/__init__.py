@@ -1,10 +1,7 @@
-"""
-Imaris *.ims file format
-"""
-
-__version__ = "0.1.1"
-__author__ = 'Alan M Watson'
-__credits__ = 'Center for Biologic Imaging (CBI)'
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "unknown"
 
 
-from .ims import IMS
+from .ims import ims
