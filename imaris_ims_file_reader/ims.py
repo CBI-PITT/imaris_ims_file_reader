@@ -287,7 +287,7 @@ class ims:
         for a specific RTC.
         """
 
-        # incomingSlices = (r,t,c,z,y,x)
+        incomingSlices = (r,t,c,z,y,x)
         t_size = list(range(self.TimePoints)[t])
         c_size = list(range(self.Channels)[c])
         z_size = len(range(self.metaData[(r, 0, 0, 'shape')][-3])[z])
@@ -310,24 +310,21 @@ class ims:
         #             output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
 
         """
-        Some issues here with the output of these arrays.  Napari sometimes expects
-        3-dim arrays and sometimes 5-dim arrays which originates from the dask array input representing
-        tczyx dimensions of the imaris file.  When os.environ["NAPARI_ASYNC"] = "1", squeezing
-        the array to 3 dimensions works.  When ASYNC is off squeese does not work.
-        Napari throws an error because it did not get a 3-dim array.
-    
-        Am I implementing slicing wrong?  or does napari have some inconsistency with the 
-        dimensions of the arrays that it expects with different loading mechanisms if the 
-        arrays have unused single dimensions.
-    
-        Currently "NAPARI_ASYNC" = '1' is set to one in the image loader
-        Currently File/Preferences/Render Images Asynchronously must be turned on for this plugin to work
+        The return statements can provide some specific use cases for when the 
+        class is providing data to Napari.
+        
+        Currently, a custom print statement provides visual feed back that 
+        data are loading and what specific data is requested / returned
+        
+        The napari_imaris_loader currently hard codes os.environ["NAPARI_ASYNC"] == '1'
         """
 
         if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
-            return np.squeeze(output_array)
-        elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+            output_array = np.squeeze(output_array)
+            print('Slices Requested: {} / Shape returned: {} \n'.format(incomingSlices,output_array.shape))
             return output_array
+        # elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+        #     return output_array
         else:
             return np.squeeze(output_array)
 
