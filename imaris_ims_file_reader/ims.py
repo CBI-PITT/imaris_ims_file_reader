@@ -1,21 +1,13 @@
-import functools
-import glob
 import itertools
 import os
-import pickle
-import random
-import shutil
-import sys
-
 import h5py
 import numpy as np
 
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
 from skimage.transform import rescale
-from psutil import virtual_memory
 
 
-class IMS:
+class ims:
     def __init__(self, file, ResolutionLevelLock=0, cache_location=None, mem_size=None, disk_size=2000):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
@@ -333,7 +325,7 @@ class IMS:
         """
 
         if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
-            return output_array
+            return np.squeeze(output_array)
         elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
             return output_array
         else:
