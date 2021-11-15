@@ -1,5 +1,5 @@
 import os
-from .ims import ims
+from imaris_ims_file_reader import ims
 import numpy as np
 
 
