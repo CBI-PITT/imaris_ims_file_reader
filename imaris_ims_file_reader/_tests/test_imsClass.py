@@ -8,7 +8,7 @@ def test(tmp_path='brain_crop3.ims'):
     
     path = os.path.join(os.path.dirname(os.path.realpath(__file__)),tmp_path)
     # Test whether a ims file can be opened
-    imsClass = ims.IMS(path)
+    imsClass = ims.ims(path)
     
     # Do we have some of the right attributes
     assert isinstance(imsClass.TimePoints, int)
