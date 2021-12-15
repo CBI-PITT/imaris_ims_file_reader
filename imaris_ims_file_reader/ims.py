@@ -428,7 +428,7 @@ class ims:
 
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
         print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
-        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=0,channel=0)
+        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=time_point,channel=channel)
 
         print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
