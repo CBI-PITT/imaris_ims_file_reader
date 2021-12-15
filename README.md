@@ -44,3 +44,7 @@ print(a.ResolutionLevelLock)
 ##### v0.1.3:  
 
 Class name has been changed to all lowercase ('ims') to be compatible with many other dependent applications.
+
+##### v0.1.4:  
+
+Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desired time point and color
