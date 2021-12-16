@@ -434,6 +434,7 @@ class ims:
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
         print('Rescale Factor = {}'.format(rescaleFactor))
 
+        workingVolume = img_as_float32(workingVolume)
         workingVolume = rescale(workingVolume, rescaleFactor, anti_aliasing=anti_aliasing)
 
         return self.dtypeImgConvert(workingVolume)
