@@ -491,6 +491,8 @@ class ims:
                 0,self.metaData[(resolutionLevel, 0, 0, 'shape')][-1]
             )
 
+        
+        failed = []
         for time in time_points:
             for color in channels:
                 for layer in range(self.metaData[(resolutionLevel,0,0,'shape')][-3]):
@@ -498,6 +500,15 @@ class ims:
                     if os.path.exists(fileName):
                         print('Skipping {} becasue it already exists'.format(fileName))
                         continue
-                    array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    try:
+                        array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    except:
+                        failed.append(resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3])
                     print('Saving: {}'.format(fileName))
-                    io.imsave(fileName, array)
+                    io.imsave(fileName, array, check_contrast=False)
+        
+        if len(failed) > 0:
+            print('Failed to extract the following layers:')
+            print(failed)
+        else:
+            print('All layers have been extracted')
