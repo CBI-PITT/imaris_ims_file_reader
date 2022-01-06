@@ -512,3 +512,41 @@ class ims:
             print(failed)
         else:
             print('All layers have been extracted')
+
+    def save_multilayer_tiff_stack(self, location=None, time_point=0, channel=0, resolution_level=0):
+        """
+        Extract 1 time point, 1 channel, all (z,y,x) for a specified resolution level.
+
+        location - path to the output tiff file. If not provided, file is saved next to the .ims file
+        Output: tiff stack (all z layers in one file)
+        """
+        if not location:
+            location = os.path.join(self.filePathBase, '{}_multilayer_stack.tif'.format(self.fileName))
+        elif type(location) != str or location == '':
+            raise TypeError('location must be a nonempty string')
+
+        if os.path.exists(location):
+            raise OSError('file at specified location already exists')
+        else:
+            os.makedirs(os.path.basename(location), exist_ok=True)
+
+        try:
+            time_point = int(time_point)
+            channel = int(channel)
+            resolution_level = int(resolution_level)
+        except TypeError:
+            raise TypeError('time_point, channel and resolution_level must be convertable to int')
+
+        try:
+            output_array = self[resolution_level, time_point, channel, :, :, :]
+        except:  # try extracting z layers one-by-one
+            output_array_shape = self.metaData[(resolution_level, time_point, channel, 'shape')][-3:]
+            output_array = np.zeros([*output_array_shape], dtype=self.dtype)  # layers with errors will be left as 0
+            for layer in range(output_array_shape[0]):
+                try:
+                    z_plane = self[resolution_level, time_point, channel, layer, :, :]
+                    output_array[layer, :, :] = z_plane
+                except Exception as e:
+                    print(f'Failed to extract layer {layer}: {e}')
+
+        io.imsave(location, output_array, check_contrast=False)
