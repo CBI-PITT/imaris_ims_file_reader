@@ -579,6 +579,7 @@ class ims:
                         array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
                     except:
                         failed.append(resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3])
+                        continue
                     print('Saving: {}'.format(fileName))
                     io.imsave(fileName, array, check_contrast=False)
         
