@@ -388,11 +388,10 @@ class ims:
         x_size = len(range(self.metaData[(r, 0, 0, 'shape')][-1])[x])
 
         # if isinstance(newData,int):
-        tmp = newData
-        newData = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
-        newData[:] = tmp
-        print(newData.shape)
-        print(newData)
+        toWrite = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
+        toWrite[:] = newData
+        print(toWrite.shape)
+        print(toWrite)
 
         print(t_size)    
         print(t_size)
@@ -400,7 +399,7 @@ class ims:
             for idxc, c in enumerate(c_size):
                 ## Below method is faster than all others tried
                 d_set_string = self.location_generator(r, t, c, data='data')
-                self.hf[d_set_string].write_direct(newData, np.s_[idxt, idxc, :, :, :], np.s_[z, y, x])
+                self.hf[d_set_string].write_direct(toWrite, np.s_[idxt, idxc, :, :, :], np.s_[z, y, x])
 
 
 
