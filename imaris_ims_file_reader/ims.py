@@ -1,28 +1,21 @@
-import functools
-import glob
 import itertools
 import os
-import pickle
-import random
-import shutil
-import sys
-
 import h5py
 import numpy as np
 
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
 from skimage.transform import rescale
-from psutil import virtual_memory
 
 
-class IMS:
-    def __init__(self, file, ResolutionLevelLock=None, cache_location=None, mem_size=None, disk_size=2000):
+class ims:
+    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
         ## NOTE: Caching is currently not implemented.  
         
         self.filePathComplete = file
+        self.write = write
         self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -37,7 +30,8 @@ class IMS:
         self.memCache = {}
         self.cacheFiles = []
         self.metaData = {}
-        self.ResolutionLevelLock = 0 if ResolutionLevelLock is None else ResolutionLevelLock
+        self.ResolutionLevelLock = ResolutionLevelLock
+        
 
         resolution_0 = self.dataset['ResolutionLevel 0']
         time_point_0 = resolution_0['TimePoint 0']
@@ -72,7 +66,6 @@ class IMS:
         )
 
         self.chunks = (1, 1, data.chunks[0], data.chunks[1], data.chunks[2])
-        self.ndim = len(self.shape)
         self.dtype = data.dtype
         self.shapeH5Array = data.shape
 
@@ -104,8 +97,6 @@ class IMS:
 
         if isinstance(self.ResolutionLevelLock, int):
             self.change_resolution_lock(self.ResolutionLevelLock)
-
-            # TODO: Should define a method to change the ResolutionLevelLock after class in initialized
                 
     
     
@@ -113,7 +104,13 @@ class IMS:
         ## Pull information from the only required dataset at each resolution
         ## which is time_point=0, channel=0
         self.ResolutionLevelLock = ResolutionLevelLock
-        self.shape = self.metaData[self.ResolutionLevelLock, 0, 0, 'shape']
+        self.shape = (
+            self.TimePoints,
+            self.Channels,
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-3],
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-2],
+            self.metaData[self.ResolutionLevelLock, 0, 0, 'shape'][-1]
+        )
         self.ndim = len(self.shape)
         self.chunks = self.metaData[self.ResolutionLevelLock, 0, 0, 'chunks']
         self.shapeH5Array = self.metaData[self.ResolutionLevelLock, 0, 0, 'shapeH5Array']
@@ -132,16 +129,25 @@ class IMS:
     #     self.hf = None
         
     def open(self):
-        print('Opening file: {} \n'.format(self.filePathComplete))
-        self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
-        self.dataset = self.hf['DataSet']
-        # print('OPENED file: {} \n'.format(self.filePathComplete))
+        if self.write == False:
+            print('Opening readonly file: {} \n'.format(self.filePathComplete))
+            self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
+            self.dataset = self.hf['DataSet']
+            # print('OPENED file: {} \n'.format(self.filePathComplete))
+        elif self.write == True:
+            print('Opening writeable file: {} \n'.format(self.filePathComplete))
+            self.hf = h5py.File(self.filePathComplete, 'a', swmr=True)
+            self.dataset = self.hf['DataSet']
+            # print('OPENED file: {} \n'.format(self.filePathComplete))
     
     def __del__(self):
         self.close()
     
     def close(self):
         ## Implement flush?
+        if self.write == True:
+            print('Flushing Buffers to Disk')
+            self.hf.flush()
         print('Closing file: {} \n'.format(self.filePathComplete))
         if self.hf is not None:
             self.hf.close()
@@ -166,6 +172,46 @@ class IMS:
         This option enables a 5D slice to lock on to a specified resolution level.
         """
 
+        res, key = self.transform_key(key)        
+
+        slice_returned = self.get_slice(
+            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
+            t=self.slice_fixer(key[0], 't', res=res),
+            c=self.slice_fixer(key[1], 'c', res=res),
+            z=self.slice_fixer(key[2], 'z', res=res),
+            y=self.slice_fixer(key[3], 'y', res=res),
+            x=self.slice_fixer(key[4], 'x', res=res)
+        )
+        return slice_returned
+
+    
+    def __setitem__(self,key,newValue):
+        
+        if self.write == False:
+            print("""
+                  IMS File can not be written to.
+                  imsClass.write = False.
+                  """)
+            pass
+        
+        res, key = self.transform_key(key)
+        
+        self.set_slice(
+            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
+            t=self.slice_fixer(key[0], 't', res=res),
+            c=self.slice_fixer(key[1], 'c', res=res),
+            z=self.slice_fixer(key[2], 'z', res=res),
+            y=self.slice_fixer(key[3], 'y', res=res),
+            x=self.slice_fixer(key[4], 'x', res=res),
+            newData=newValue
+        )
+        
+        
+        
+        
+
+    def transform_key(self,key):
+        
         res = self.ResolutionLevelLock
 
         if not isinstance(key, slice) and not isinstance(key, int) and len(key) == 6:
@@ -188,16 +234,9 @@ class IMS:
         while len(key) < 5:
             key.append(slice(None))
         key = tuple(key)
-
-        slice_returned = self.get_slice(
-            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
-            t=self.slice_fixer(key[0], 't', res=res),
-            c=self.slice_fixer(key[1], 'c', res=res),
-            z=self.slice_fixer(key[2], 'z', res=res),
-            y=self.slice_fixer(key[3], 'y', res=res),
-            x=self.slice_fixer(key[4], 'x', res=res)
-        )
-        return slice_returned
+        
+        return res,key
+        
 
     def read_numerical_dataset_attr(self, attrib):
         return float(self.read_attribute('DataSetInfo/Image', attrib))
@@ -292,7 +331,7 @@ class IMS:
         for a specific RTC.
         """
 
-        # incomingSlices = (r,t,c,z,y,x)
+        incomingSlices = (r,t,c,z,y,x)
         t_size = list(range(self.TimePoints)[t])
         c_size = list(range(self.Channels)[c])
         z_size = len(range(self.metaData[(r, 0, 0, 'shape')][-3])[z])
@@ -315,26 +354,54 @@ class IMS:
         #             output_array[idxt, idxc, :, :, :] = hf[d_set_string][z, y, x]
 
         """
-        Some issues here with the output of these arrays.  Napari sometimes expects
-        3-dim arrays and sometimes 5-dim arrays which originates from the dask array input representing
-        tczyx dimensions of the imaris file.  When os.environ["NAPARI_ASYNC"] = "1", squeezing
-        the array to 3 dimensions works.  When ASYNC is off squeese does not work.
-        Napari throws an error because it did not get a 3-dim array.
-    
-        Am I implementing slicing wrong?  or does napari have some inconsistency with the 
-        dimensions of the arrays that it expects with different loading mechanisms if the 
-        arrays have unused single dimensions.
-    
-        Currently "NAPARI_ASYNC" = '1' is set to one in the image loader
-        Currently File/Preferences/Render Images Asynchronously must be turned on for this plugin to work
+        The return statements can provide some specific use cases for when the 
+        class is providing data to Napari.
+        
+        Currently, a custom print statement provides visual feed back that 
+        data are loading and what specific data is requested / returned
+        
+        The napari_imaris_loader currently hard codes os.environ["NAPARI_ASYNC"] == '1'
         """
 
         if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
+            output_array = np.squeeze(output_array)
+            print('Slices Requested: {} / Shape returned: {} \n'.format(incomingSlices,output_array.shape))
             return output_array
-        elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
-            return output_array
+        # elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+        #     return output_array
         else:
             return np.squeeze(output_array)
+
+    
+    def set_slice(self, r, t, c, z, y, x, newData):
+        """
+        IMS stores 3D datasets ONLY with Resolution, Time, and Color as 'directory'
+        structure writing HDF5.  Thus, data access can only happen across dims XYZ
+        for a specific RTC.
+        """
+
+        # incomingSlices = (r,t,c,z,y,x)
+        t_size = list(range(self.TimePoints)[t])
+        c_size = list(range(self.Channels)[c])
+        z_size = len(range(self.metaData[(r, 0, 0, 'shape')][-3])[z])
+        y_size = len(range(self.metaData[(r, 0, 0, 'shape')][-2])[y])
+        x_size = len(range(self.metaData[(r, 0, 0, 'shape')][-1])[x])
+
+        # if isinstance(newData,int):
+        toWrite = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
+        toWrite[:] = newData
+        print(toWrite.shape)
+        print(toWrite)
+
+        print(t_size)    
+        print(t_size)
+        for idxt, t in enumerate(t_size):
+            for idxc, c in enumerate(c_size):
+                ## Below method is faster than all others tried
+                d_set_string = self.location_generator(r, t, c, data='data')
+                self.hf[d_set_string].write_direct(toWrite, np.s_[idxt, idxc, :, :, :], np.s_[z, y, x])
+
+
 
     def dtypeImgConvert(self, image):
         """
@@ -436,12 +503,13 @@ class IMS:
 
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
         print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
-        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=0,channel=0)
+        workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=time_point,channel=channel)
 
         print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
         print('Rescale Factor = {}'.format(rescaleFactor))
 
+        workingVolume = img_as_float32(workingVolume)
         workingVolume = rescale(workingVolume, rescaleFactor, anti_aliasing=anti_aliasing)
 
         return self.dtypeImgConvert(workingVolume)
@@ -498,6 +566,8 @@ class IMS:
                 0,self.metaData[(resolutionLevel, 0, 0, 'shape')][-1]
             )
 
+        
+        failed = []
         for time in time_points:
             for color in channels:
                 for layer in range(self.metaData[(resolutionLevel,0,0,'shape')][-3]):
@@ -505,6 +575,15 @@ class IMS:
                     if os.path.exists(fileName):
                         print('Skipping {} becasue it already exists'.format(fileName))
                         continue
-                    array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    try:
+                        array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                    except:
+                        failed.append(resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3])
                     print('Saving: {}'.format(fileName))
-                    io.imsave(fileName, array)
+                    io.imsave(fileName, array, check_contrast=False)
+        
+        if len(failed) > 0:
+            print('Failed to extract the following layers:')
+            print(failed)
+        else:
+            print('All layers have been extracted')
