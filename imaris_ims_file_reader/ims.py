@@ -8,13 +8,14 @@ from skimage.transform import rescale
 
 
 class ims:
-    def __init__(self, file, ResolutionLevelLock=0, cache_location=None, mem_size=None, disk_size=2000):
+    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
         ## NOTE: Caching is currently not implemented.  
         
         self.filePathComplete = file
+        self.write = write
         self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -30,6 +31,7 @@ class ims:
         self.cacheFiles = []
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
+        
 
         resolution_0 = self.dataset['ResolutionLevel 0']
         time_point_0 = resolution_0['TimePoint 0']
@@ -127,16 +129,25 @@ class ims:
     #     self.hf = None
         
     def open(self):
-        print('Opening file: {} \n'.format(self.filePathComplete))
-        self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
-        self.dataset = self.hf['DataSet']
-        # print('OPENED file: {} \n'.format(self.filePathComplete))
+        if self.write == False:
+            print('Opening readonly file: {} \n'.format(self.filePathComplete))
+            self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
+            self.dataset = self.hf['DataSet']
+            # print('OPENED file: {} \n'.format(self.filePathComplete))
+        elif self.write == True:
+            print('Opening writeable file: {} \n'.format(self.filePathComplete))
+            self.hf = h5py.File(self.filePathComplete, 'a', swmr=True)
+            self.dataset = self.hf['DataSet']
+            # print('OPENED file: {} \n'.format(self.filePathComplete))
     
     def __del__(self):
         self.close()
     
     def close(self):
         ## Implement flush?
+        if self.write == True:
+            print('Flushing Buffers to Disk')
+            self.hf.flush()
         print('Closing file: {} \n'.format(self.filePathComplete))
         if self.hf is not None:
             self.hf.close()
@@ -161,6 +172,46 @@ class ims:
         This option enables a 5D slice to lock on to a specified resolution level.
         """
 
+        res, key = self.transform_key(key)        
+
+        slice_returned = self.get_slice(
+            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
+            t=self.slice_fixer(key[0], 't', res=res),
+            c=self.slice_fixer(key[1], 'c', res=res),
+            z=self.slice_fixer(key[2], 'z', res=res),
+            y=self.slice_fixer(key[3], 'y', res=res),
+            x=self.slice_fixer(key[4], 'x', res=res)
+        )
+        return slice_returned
+
+    
+    def __setitem__(self,key,newValue):
+        
+        if self.write == False:
+            print("""
+                  IMS File can not be written to.
+                  imsClass.write = False.
+                  """)
+            pass
+        
+        res, key = self.transform_key(key)
+        
+        self.set_slice(
+            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
+            t=self.slice_fixer(key[0], 't', res=res),
+            c=self.slice_fixer(key[1], 'c', res=res),
+            z=self.slice_fixer(key[2], 'z', res=res),
+            y=self.slice_fixer(key[3], 'y', res=res),
+            x=self.slice_fixer(key[4], 'x', res=res),
+            newData=newValue
+        )
+        
+        
+        
+        
+
+    def transform_key(self,key):
+        
         res = self.ResolutionLevelLock
 
         if not isinstance(key, slice) and not isinstance(key, int) and len(key) == 6:
@@ -183,16 +234,9 @@ class ims:
         while len(key) < 5:
             key.append(slice(None))
         key = tuple(key)
-
-        slice_returned = self.get_slice(
-            r=res if res is not None else 0,  # Force ResolutionLock of None to be 0 when slicing
-            t=self.slice_fixer(key[0], 't', res=res),
-            c=self.slice_fixer(key[1], 'c', res=res),
-            z=self.slice_fixer(key[2], 'z', res=res),
-            y=self.slice_fixer(key[3], 'y', res=res),
-            x=self.slice_fixer(key[4], 'x', res=res)
-        )
-        return slice_returned
+        
+        return res,key
+        
 
     def read_numerical_dataset_attr(self, attrib):
         return float(self.read_attribute('DataSetInfo/Image', attrib))
@@ -327,6 +371,37 @@ class ims:
         #     return output_array
         else:
             return np.squeeze(output_array)
+
+    
+    def set_slice(self, r, t, c, z, y, x, newData):
+        """
+        IMS stores 3D datasets ONLY with Resolution, Time, and Color as 'directory'
+        structure writing HDF5.  Thus, data access can only happen across dims XYZ
+        for a specific RTC.
+        """
+
+        # incomingSlices = (r,t,c,z,y,x)
+        t_size = list(range(self.TimePoints)[t])
+        c_size = list(range(self.Channels)[c])
+        z_size = len(range(self.metaData[(r, 0, 0, 'shape')][-3])[z])
+        y_size = len(range(self.metaData[(r, 0, 0, 'shape')][-2])[y])
+        x_size = len(range(self.metaData[(r, 0, 0, 'shape')][-1])[x])
+
+        # if isinstance(newData,int):
+        toWrite = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
+        toWrite[:] = newData
+        print(toWrite.shape)
+        print(toWrite)
+
+        print(t_size)    
+        print(t_size)
+        for idxt, t in enumerate(t_size):
+            for idxc, c in enumerate(c_size):
+                ## Below method is faster than all others tried
+                d_set_string = self.location_generator(r, t, c, data='data')
+                self.hf[d_set_string].write_direct(toWrite, np.s_[idxt, idxc, :, :, :], np.s_[z, y, x])
+
+
 
     def dtypeImgConvert(self, image):
         """
