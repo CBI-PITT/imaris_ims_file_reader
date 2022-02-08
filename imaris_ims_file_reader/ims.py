@@ -8,7 +8,7 @@ from skimage.transform import rescale
 
 
 class ims:
-    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000):
+    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=False):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
@@ -28,6 +28,7 @@ class ims:
         self.disk_size = disk_size * 1e9 if disk_size is not None else None
         self.mem_size = mem_size * 1e9 if mem_size is not None else None
         self.memCache = {}
+        self.squeeze_output = squeeze_output
         self.cacheFiles = []
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
@@ -168,8 +169,8 @@ class ims:
         will be obeyed.  If ResolutionLevelLock is == None - default resolution is 0 (full-res)
         and a slice of 5 or less dimensions will extract information from resolutionLevel 0.
 
-        ResolutionLevelLock is used when building a multi-resolution series to load into napari
-        This option enables a 5D slice to lock on to a specified resolution level.
+        ResolutionLevelLock is used to focus on a specific resoltion level.
+        This option enables a 5D slicing to lock on to a specified resolution level.
         """
 
         res, key = self.transform_key(key)        
@@ -363,14 +364,17 @@ class ims:
         The napari_imaris_loader currently hard codes os.environ["NAPARI_ASYNC"] == '1'
         """
 
-        if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
-            output_array = np.squeeze(output_array)
-            print('Slices Requested: {} / Shape returned: {} \n'.format(incomingSlices,output_array.shape))
-            return output_array
-        # elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+        # if "NAPARI_ASYNC" in os.environ and os.environ["NAPARI_ASYNC"] == '1':
+        #     # output_array = np.squeeze(output_array)
+        #     print('Slices Requested: {} / Shape returned: {} \n'.format(incomingSlices,output_array.shape))
         #     return output_array
-        else:
+        # # elif "NAPARI_OCTREE" in os.environ and os.environ["NAPARI_OCTREE"] == '1':
+        # #     return output_array
+        # else:
+        if self.squeeze_output:
             return np.squeeze(output_array)
+        else:
+            return output_array
 
     
     def set_slice(self, r, t, c, z, y, x, newData):
@@ -578,7 +582,7 @@ class ims:
                     try:
                         array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
                     except:
-                        failed.append(resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3])
+                        failed.append((resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3]))
                         continue
                     print('Saving: {}'.format(fileName))
                     io.imsave(fileName, array, check_contrast=False)

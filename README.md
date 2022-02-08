@@ -35,6 +35,14 @@ a = ims(myFile.ims,ResolutionLevelLock=3)
 a.change_resolution_lock(2)
 print(a.ResolutionLevelLock)
 
+# 'squeeze_output' option returns arrays in their reduced form similar to a numpy array.  This is off by default to maintain compatibility with the rest of the imaris-ims-file-reader API.
+a = ims(myFile.ims)
+print(a[0,0,0].shape)
+#(1,1,1,1024,1024)
+
+a = ims(myFile.ims, squeeze_output=True)
+print(a[0,0,0].shape)
+#(1024,1024)
 ```
 
 
@@ -48,3 +56,9 @@ Class name has been changed to all lowercase ('ims') to be compatible with many 
 ##### v0.1.4:  
 
 Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desired time point and color
+
+**v0.1.5:**
+
+-Compatibility changes for Napari.  
+
+-Default behaviour changed to always return a 5-dim array.  squeeze_output=True can be specified to remove all single dims by automatically calling np.squeeze on outputs.
