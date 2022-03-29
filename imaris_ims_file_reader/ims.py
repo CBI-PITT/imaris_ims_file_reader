@@ -8,7 +8,7 @@ from skimage.transform import rescale
 
 
 class ims:
-    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=False):
+    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills

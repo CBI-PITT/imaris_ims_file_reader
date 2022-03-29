@@ -35,14 +35,14 @@ a = ims(myFile.ims,ResolutionLevelLock=3)
 a.change_resolution_lock(2)
 print(a.ResolutionLevelLock)
 
-# 'squeeze_output' option returns arrays in their reduced form similar to a numpy array.  This is off by default to maintain compatibility with the rest of the imaris-ims-file-reader API.
+# The 'squeeze_output' option returns arrays in their reduced form similar to a numpy array.  This is True by default to maintain behavior similar to numpy; however, some applications may benefit from predictably returning a 5 axis array.  For example, napari prefers to have outputs with the same number of axes as the input.
 a = ims(myFile.ims)
 print(a[0,0,0].shape)
-#(1,1,1,1024,1024)
-
-a = ims(myFile.ims, squeeze_output=True)
-print(a[0,0,0].shape)
 #(1024,1024)
+
+a = ims(myFile.ims, squeeze_output=False)
+print(a[0,0,0].shape)
+#(1,1,1,1024,1024)
 ```
 
 
@@ -62,3 +62,7 @@ Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desir
 -Compatibility changes for Napari.  
 
 -Default behaviour changed to always return a 5-dim array.  squeeze_output=True can be specified to remove all single dims by automatically calling np.squeeze on outputs.
+
+**v0.1.6:**
+
+-Return default behaviour back to squeeze_output=True so that the reader performance more like a normal numpy array.
