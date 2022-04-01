@@ -508,6 +508,8 @@ class ims:
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
         print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
         workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=time_point,channel=channel)
+        if len(workingVolume.shape) > 3:
+            workingVolume = np.squeeze(workingVolume)
 
         print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
@@ -581,6 +583,8 @@ class ims:
                         continue
                     try:
                         array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
+                        if len(array.shape) > 2:
+                            array = np.squeeze(array)
                     except:
                         failed.append((resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3]))
                         continue
@@ -601,14 +605,17 @@ class ims:
         Output: tiff stack (all z layers in one file)
         """
         if not location:
-            location = os.path.join(self.filePathBase, '{}_multilayer_stack.tif'.format(self.fileName))
+            location = os.path.join(
+                self.filePathBase,
+                '{}_multilayer_stack_r{}.tif'.format(self.fileName, resolution_level)
+            )
         elif type(location) != str or location == '':
             raise TypeError('location must be a nonempty string')
 
         if os.path.exists(location):
             raise OSError('file at specified location already exists')
         else:
-            os.makedirs(os.path.basename(location), exist_ok=True)
+            os.makedirs(os.path.dirname(location), exist_ok=True)
 
         try:
             time_point = int(time_point)
@@ -618,13 +625,13 @@ class ims:
             raise TypeError('time_point, channel and resolution_level must be convertable to int')
 
         try:
-            output_array = self[resolution_level, time_point, channel, :, :, :]
+            output_array = np.squeeze(self[resolution_level, time_point, channel, :, :, :])
         except:  # try extracting z layers one-by-one
             output_array_shape = self.metaData[(resolution_level, time_point, channel, 'shape')][-3:]
             output_array = np.zeros([*output_array_shape], dtype=self.dtype)  # layers with errors will be left as 0
             for layer in range(output_array_shape[0]):
                 try:
-                    z_plane = self[resolution_level, time_point, channel, layer, :, :]
+                    z_plane = np.squeeze(self[resolution_level, time_point, channel, layer, :, :])
                     output_array[layer, :, :] = z_plane
                 except Exception as e:
                     print(f'Failed to extract layer {layer}: {e}')
