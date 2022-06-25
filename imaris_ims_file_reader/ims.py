@@ -9,7 +9,6 @@ from skimage.transform import rescale
 
 class ims:
     def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True):
-        
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
         ## NOTE: Caching is currently not implemented.  
@@ -44,18 +43,12 @@ class ims:
         self.Channels = len(time_point_0)
 
         self.resolution = (
-            round(
                 (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
                 / self.read_numerical_dataset_attr('Z'),
-                3),
-            round(
                 (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
                 / self.read_numerical_dataset_attr('Y'),
-                3),
-            round(
                 (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
                 / self.read_numerical_dataset_attr('X'),
-                3)
         )
 
         self.shape = (
@@ -84,7 +77,7 @@ class ims:
                 int(self.read_attribute(location_attr, 'ImageSizeX'))
             )
             self.metaData[r, t, c, 'resolution'] = tuple(
-                [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
+                [float((origShape / newShape) * origRes) for origRes, origShape, newShape in
                  zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
             )
             self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
