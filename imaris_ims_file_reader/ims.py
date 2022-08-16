@@ -2,6 +2,7 @@ import itertools
 import os
 import h5py
 import numpy as np
+import warnings
 
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
 from skimage.transform import rescale
@@ -72,6 +73,7 @@ class ims:
 
         for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
                                          range(self.Channels)):
+            # print('{},{},{}'.format(r,t,c))
             location_attr = self.location_generator(r, t, c, data='attrib')
             location_data = self.location_generator(r, t, c, data='data')
 
@@ -87,8 +89,18 @@ class ims:
                 [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
                  zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
             )
-            self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
-            self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
+            try:
+                self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
+            except:
+                warntxt = '''HistogramMax value is not present for resolution {}, time {}, channel {}. 
+                              This may cause compatibility issues with programs that use imaris_ims_file_reader'''.format(r,t,c)
+                warnings.warn(warntxt)
+            try:
+                self.metaData[r, t, c, 'HistogramMin'] = int(float(self.read_attribute(location_attr, 'HistogramMin')))
+            except:
+                warntxt = '''HistogramMin value is not present for resolution {}, time {}, channel {}.
+                              This may cause compatibility issues with programs that use imaris_ims_file_reader'''.format(r,t,c)
+                warnings.warn(warntxt)
 
             # Collect dataset info
             self.metaData[r, t, c, 'chunks'] = (

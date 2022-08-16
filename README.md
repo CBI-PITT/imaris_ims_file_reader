@@ -66,3 +66,8 @@ Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desir
 **v0.1.6:**
 
 -Return default behaviour back to squeeze_output=True so that the reader performance more like a normal numpy array.
+
+**v0.1.7:**
+
+-Add warnings when HistogramMax and HistogramMin values are not present in channel data.  This is an issue when writing time series with PyImarisWriter.  The absence of these values may cause compatibility issues with programs that use imaris-ims-file-reader.
+
