@@ -9,7 +9,9 @@ from skimage.transform import rescale
 
 
 class ims:
-    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True):
+    def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
+                 resolution_decimal_places = 3
+                 ):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
         ##  disk_size = in gigabytes that remain FREE as cache fills
@@ -33,6 +35,7 @@ class ims:
         self.cacheFiles = []
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
+        self.resolution_decimal_places = resolution_decimal_places
         
 
         resolution_0 = self.dataset['ResolutionLevel 0']
@@ -44,19 +47,16 @@ class ims:
         self.TimePoints = len(resolution_0)
         self.Channels = len(time_point_0)
 
+        # Round these values later because they are used below to calculate resolutions for other resolution levels
         self.resolution = (
-            round(
                 (self.read_numerical_dataset_attr('ExtMax2') - self.read_numerical_dataset_attr('ExtMin2'))
                 / self.read_numerical_dataset_attr('Z'),
-                3),
-            round(
+                
                 (self.read_numerical_dataset_attr('ExtMax1') - self.read_numerical_dataset_attr('ExtMin1'))
                 / self.read_numerical_dataset_attr('Y'),
-                3),
-            round(
+                
                 (self.read_numerical_dataset_attr('ExtMax0') - self.read_numerical_dataset_attr('ExtMin0'))
-                / self.read_numerical_dataset_attr('X'),
-                3)
+                / self.read_numerical_dataset_attr('X')
         )
 
         self.shape = (
@@ -85,10 +85,20 @@ class ims:
                 int(self.read_attribute(location_attr, 'ImageSizeY')),
                 int(self.read_attribute(location_attr, 'ImageSizeX'))
             )
+            
+            
+            
+            #Collect Resolution information
             self.metaData[r, t, c, 'resolution'] = tuple(
-                [round(float((origShape / newShape) * origRes), 3) for origRes, origShape, newShape in
+                [float((origShape / newShape) * origRes) for origRes, origShape, newShape in
                  zip(self.resolution, self.shape[-3:], self.metaData[r, t, c, 'shape'][-3:])]
-            )
+                )
+            
+            #Round Resolution
+            self.metaData[r, t, c, 'resolution'] = tuple(
+                [round(x,self.resolution_decimal_places) if self.resolution_decimal_places is not None else x for x in self.metaData[r, t, c, 'resolution']]
+                )
+            
             try:
                 self.metaData[r, t, c, 'HistogramMax'] = int(float(self.read_attribute(location_attr, 'HistogramMax')))
             except:
@@ -107,10 +117,16 @@ class ims:
             1, 1, self.hf[location_data].chunks[0], self.hf[location_data].chunks[1], self.hf[location_data].chunks[2])
             self.metaData[r, t, c, 'shapeH5Array'] = self.hf[location_data].shape
             self.metaData[r, t, c, 'dtype'] = self.hf[location_data].dtype
-
+        
+        #Round Resolution level0
+        self.resolution = tuple(
+            [round(x,self.resolution_decimal_places) if self.resolution_decimal_places is not None else x for x in self.resolution]
+            )
+        
         if isinstance(self.ResolutionLevelLock, int):
             self.change_resolution_lock(self.ResolutionLevelLock)
-                
+        
+        
     
     
     def change_resolution_lock(self,ResolutionLevelLock):
