@@ -43,6 +43,35 @@ print(a[0,0,0].shape)
 a = ims(myFile.ims, squeeze_output=False)
 print(a[0,0,0].shape)
 #(1,1,1,1024,1024)
+
+###################################################################
+###  Open the Imaris file as a Zarr Store (currently read only) ###
+###################################################################
+from imaris_ims_file_reader.ims import ims
+import zarr
+
+store = ims(myFile.ims,ResolutionLevelLock=2)
+print(store)
+#<imaris_ims_file_reader.ims_zarr_store.ims_zarr_store object at 0x7f48965f9ac0>
+
+# The store object is NOT a sliceable array, but it does have arrtibutes that describe what to expect after opening the store.
+print(store.ResolutionLevelLock)
+print(store.ResolutionLevels)
+print(store.TimePoints)
+print(store.Channels)
+print(store.shape)
+print(store.chunks)
+print(store.dtype)
+print(store.ndim)
+
+zarray = zarr.open(store,mode='r')
+print(store.shape)
+print(store.chunks)
+print(store.dtype)
+print(store.ndim)
+
+print(zarray[0,0,0].shape)
+#(1024,1024)
 ```
 
 
@@ -71,3 +100,10 @@ Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desir
 
 -Add warnings when HistogramMax and HistogramMin values are not present in channel data.  This is an issue when writing time series with PyImarisWriter.  The absence of these values may cause compatibility issues with programs that use imaris-ims-file-reader.
 
+**v0.1.8:**
+
+-Changed resolution rounding behaviour to make resolution calculation on ResolutionLevels > 0 more accurate
+
+-Added option 'resolution_decimal_places' which enables the user to choose the number of decimal places to round resolutions (default:3)
+
+-Added a new ims convenience function.  This aims to be a drop in replacement with all previous versions of the library, but adds an 'aszarr' option.  If aszarr=True (default:False), the object returned is a zarr store.  zarr.open(store,mode='r') to interact with the array.

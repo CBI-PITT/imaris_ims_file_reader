@@ -84,9 +84,13 @@ class ims_zarr_store(Store):
         self._files = ['.zarray','.zgroup','.zattrs','.zmetadata']
         self.ims = self.open_ims()
         self.ResolutionLevels = self.ims.ResolutionLevels
+        
+        self.TimePoints = self.ims.TimePoints
+        self.Channels = self.ims.Channels
         self.chunks = self.ims.chunks
         self.shape = self.ims.shape
         self.dtype = self.ims.dtype
+        self.ndim = self.ims.ndim
     
     def open_ims(self):
         return ims.ims(self.path,
