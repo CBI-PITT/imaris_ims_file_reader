@@ -7,8 +7,29 @@ import warnings
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
 from skimage.transform import rescale
 
-
-class ims:
+# Convienence Function:  Will handle opening as a ims_reader class or zarr store based on the aszarr:Bool
+def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
+             resolution_decimal_places = 3, 
+             aszarr=False):
+    if aszarr:
+        from imaris_ims_file_reader import ims_zarr_store
+        return ims_zarr_store.ims_zarr_store(file,ResolutionLevelLock=ResolutionLevelLock)
+    else:
+        return ims_reader(
+            file, ResolutionLevelLock=ResolutionLevelLock, 
+            write=write, 
+            cache_location=cache_location, 
+            mem_size=mem_size, 
+            disk_size=disk_size, 
+            squeeze_output=squeeze_output,
+            resolution_decimal_places=resolution_decimal_places
+            )
+    
+    
+    
+    
+class ims_reader:
+    
     def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
                  resolution_decimal_places = 3
                  ):
