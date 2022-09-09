@@ -44,13 +44,13 @@ a = ims(myFile.ims, squeeze_output=False)
 print(a[0,0,0].shape)
 #(1,1,1,1024,1024)
 
-###################################################################
-###  Open the Imaris file as a Zarr Store (currently read only) ###
-###################################################################
+#########################################################
+###  Open the Imaris file as a Zarr Store (read only) ###
+#########################################################
 from imaris_ims_file_reader.ims import ims
 import zarr
 
-store = ims(myFile.ims,ResolutionLevelLock=2)
+store = ims(myFile.ims,ResolutionLevelLock=2, aszarr=True)
 print(store)
 #<imaris_ims_file_reader.ims_zarr_store.ims_zarr_store object at 0x7f48965f9ac0>
 
@@ -104,6 +104,6 @@ Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desir
 
 -Changed resolution rounding behaviour to make resolution calculation on ResolutionLevels > 0 more accurate
 
--Added option 'resolution_decimal_places' which enables the user to choose the number of decimal places to round resolutions (default:3)
+-Added option 'resolution_decimal_places' which enables the user to choose the number of decimal places to round resolutions (default:3).  'None' will NOT round the output.
 
 -Added a new ims convenience function.  This aims to be a drop in replacement with all previous versions of the library, but adds an 'aszarr' option.  If aszarr=True (default:False), the object returned is a zarr store.  zarr.open(store,mode='r') to interact with the array.
