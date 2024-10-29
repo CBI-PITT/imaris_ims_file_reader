@@ -180,12 +180,12 @@ class ims_reader:
         
     def open(self):
         if self.write == False:
-            print('Opening readonly file: {} \n'.format(self.filePathComplete))
+            # print('Opening readonly file: {} \n'.format(self.filePathComplete))
             self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
             self.dataset = self.hf['DataSet']
             # print('OPENED file: {} \n'.format(self.filePathComplete))
         elif self.write == True:
-            print('Opening writeable file: {} \n'.format(self.filePathComplete))
+            # print('Opening writeable file: {} \n'.format(self.filePathComplete))
             self.hf = h5py.File(self.filePathComplete, 'a', swmr=True)
             self.dataset = self.hf['DataSet']
             # print('OPENED file: {} \n'.format(self.filePathComplete))
@@ -196,9 +196,9 @@ class ims_reader:
     def close(self):
         ## Implement flush?
         if self.write == True:
-            print('Flushing Buffers to Disk')
+            # print('Flushing Buffers to Disk')
             self.hf.flush()
-        print('Closing file: {} \n'.format(self.filePathComplete))
+        # print('Closing file: {} \n'.format(self.filePathComplete))
         if self.hf is not None:
             self.hf.close()
         self.hf = None
