@@ -30,6 +30,7 @@ Example:
 
 import os
 import h5py
+import hdf5plugin
 import shutil
 import time
 import numpy as np
