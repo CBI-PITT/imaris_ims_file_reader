@@ -30,6 +30,7 @@ Example:
 
 import os
 import h5py
+import hdf5plugin
 import shutil
 import time
 import numpy as np
@@ -51,7 +52,6 @@ from numcodecs.compat import (
     ensure_text,
     ensure_contiguous_ndarray
 )
-# from numcodecs.registry import codec_registry
 
 
 from zarr.util import (buffer_size, json_loads, nolock, normalize_chunks,

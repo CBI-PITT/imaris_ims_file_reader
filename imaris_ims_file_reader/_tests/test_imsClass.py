@@ -1,6 +1,7 @@
 import os
 from imaris_ims_file_reader.ims import ims
 import numpy as np
+import zarr
 
 
 # tmp_path is a pytest fixture
@@ -18,7 +19,13 @@ def test(tmp_path='brain_crop3.ims'):
     assert len(imsClass.resolution) == 3
     assert isinstance(imsClass.metaData,dict)
     
-    # Can we extract a numpy array
+    # Can we extract a numpy array?
     array = imsClass[imsClass.ResolutionLevels-1,0,0,:,:,:]
     assert isinstance(array,np.ndarray)
+
+    # Will it open as a zarr store?
+    store = ims(path, aszarr=True)
+    zarray = zarr.open(store)
+    array = zarray[0,0,:,:,:]
+    assert isinstance(array, np.ndarray)
     
