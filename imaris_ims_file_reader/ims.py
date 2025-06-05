@@ -42,6 +42,7 @@ class ims_reader:
         
         self.filePathComplete = file
         self.write = write
+        self.verbose = verbose
         self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -59,7 +60,6 @@ class ims_reader:
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
         self.resolution_decimal_places = resolution_decimal_places
-        self.verbose = verbose
         
 
         resolution_0 = self.dataset['ResolutionLevel 0']
