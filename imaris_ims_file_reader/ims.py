@@ -10,10 +10,10 @@ from skimage.transform import rescale
 # Convienence Function:  Will handle opening as a ims_reader class or zarr store based on the aszarr:Bool
 def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
              resolution_decimal_places = 3, 
-             aszarr=False):
+             aszarr=False, verbose=False):
     if aszarr:
         from imaris_ims_file_reader import ims_zarr_store
-        return ims_zarr_store.ims_zarr_store(file,ResolutionLevelLock=ResolutionLevelLock)
+        return ims_zarr_store.ims_zarr_store(file,ResolutionLevelLock=ResolutionLevelLock, verbose=verbose)
     else:
         return ims_reader(
             file, ResolutionLevelLock=ResolutionLevelLock, 
@@ -22,7 +22,8 @@ def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=
             mem_size=mem_size, 
             disk_size=disk_size, 
             squeeze_output=squeeze_output,
-            resolution_decimal_places=resolution_decimal_places
+            resolution_decimal_places=resolution_decimal_places,
+            verbose=verbose
             )
     
     
@@ -31,7 +32,7 @@ def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=
 class ims_reader:
     
     def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
-                 resolution_decimal_places = 3
+                 resolution_decimal_places = 3, verbose=False
                  ):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
@@ -57,6 +58,7 @@ class ims_reader:
         self.metaData = {}
         self.ResolutionLevelLock = ResolutionLevelLock
         self.resolution_decimal_places = resolution_decimal_places
+        self.verbose = verbose
         
 
         resolution_0 = self.dataset['ResolutionLevel 0']
@@ -94,7 +96,7 @@ class ims_reader:
 
         for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
                                          range(self.Channels)):
-            # print('{},{},{}'.format(r,t,c))
+
             location_attr = self.location_generator(r, t, c, data='attrib')
             location_data = self.location_generator(r, t, c, data='data')
 
@@ -180,15 +182,13 @@ class ims_reader:
         
     def open(self):
         if self.write == False:
-            print('Opening readonly file: {} \n'.format(self.filePathComplete))
+            if self.verbose: print('Opening readonly file: {} \n'.format(self.filePathComplete))
             self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
             self.dataset = self.hf['DataSet']
-            # print('OPENED file: {} \n'.format(self.filePathComplete))
         elif self.write == True:
-            print('Opening writeable file: {} \n'.format(self.filePathComplete))
+            if self.verbose: print('Opening writeable file: {} \n'.format(self.filePathComplete))
             self.hf = h5py.File(self.filePathComplete, 'a', swmr=True)
             self.dataset = self.hf['DataSet']
-            # print('OPENED file: {} \n'.format(self.filePathComplete))
     
     def __del__(self):
         self.close()
@@ -196,14 +196,13 @@ class ims_reader:
     def close(self):
         ## Implement flush?
         if self.write == True:
-            print('Flushing Buffers to Disk')
+            if self.verbose: print('Flushing Buffers to Disk')
             self.hf.flush()
-        print('Closing file: {} \n'.format(self.filePathComplete))
+        if self.verbose: print('Closing file: {} \n'.format(self.filePathComplete))
         if self.hf is not None:
             self.hf.close()
         self.hf = None
         self.dataset = None
-        # print('CLOSED file: {} \n'.format(self.filePathComplete))
 
     def __getitem__(self, key):
         """
@@ -238,7 +237,7 @@ class ims_reader:
     def __setitem__(self,key,newValue):
         
         if self.write == False:
-            print("""
+            if self.verbose: print("""
                   IMS File can not be written to.
                   imsClass.write = False.
                   """)
@@ -443,11 +442,11 @@ class ims_reader:
         # if isinstance(newData,int):
         toWrite = np.zeros((len(t_size), len(c_size), z_size, y_size, x_size), dtype=self.dtype)
         toWrite[:] = newData
-        print(toWrite.shape)
-        print(toWrite)
+        if self.verbose: print(toWrite.shape)
+        if self.verbose: print(toWrite)
 
-        print(t_size)    
-        print(t_size)
+        if self.verbose: print(t_size)
+        if self.verbose: print(t_size)
         for idxt, t in enumerate(t_size):
             for idxc, c in enumerate(c_size):
                 ## Below method is faster than all others tried
@@ -505,16 +504,16 @@ class ims_reader:
         image = None    
         for num, z_layer in enumerate(z):
             
-            print('Reading layer ' + str(num) + ' of ' + str(z))
+            if self.verbose: print('Reading layer ' + str(num) + ' of ' + str(z))
             if image is None:
                 image = self[resolution_level, time_point, channel, z_layer, y, x]
-                print(image.dtype)
+                if self.verbose: print(image.dtype)
                 if projection_type == 'mean':
                     image = img_as_float32(image)
             else:
                 imageNew = self[resolution_level, time_point, channel, z_layer, y, x]
 
-                print('Incoroprating layer ' + str(num) + ' of ' + str(z))
+                if self.verbose: print('Incoroprating layer ' + str(num) + ' of ' + str(z))
 
                 if projection_type == 'max':
                     image[:] = np.maximum(image,imageNew)
@@ -555,12 +554,12 @@ class ims_reader:
                 resolutionLevelToExtract = res
 
         workingVolumeResolution = self.metaData[resolutionLevelToExtract,time_point,channel,'resolution']
-        print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
+        if self.verbose: print('Reading ResolutionLevel {}'.format(resolutionLevelToExtract))
         workingVolume = self.get_Resolution_Level(resolutionLevelToExtract,time_point=time_point,channel=channel)
 
-        print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
+        if self.verbose: print('Resizing volume from resolution in microns {} to {}'.format(str(workingVolumeResolution), str(output_resolution)))
         rescaleFactor = tuple([round(x/y,5) for x,y in zip(workingVolumeResolution,output_resolution)])
-        print('Rescale Factor = {}'.format(rescaleFactor))
+        if self.verbose: print('Rescale Factor = {}'.format(rescaleFactor))
 
         workingVolume = img_as_float32(workingVolume)
         workingVolume = rescale(workingVolume, rescaleFactor, anti_aliasing=anti_aliasing)
@@ -626,21 +625,21 @@ class ims_reader:
                 for layer in range(self.metaData[(resolutionLevel,0,0,'shape')][-3]):
                     fileName = os.path.join(location,self.image_file_namer(resolutionLevel,time,color,layer,prefix='', ext='.tif'))
                     if os.path.exists(fileName):
-                        print('Skipping {} becasue it already exists'.format(fileName))
+                        if self.verbose: print('Skipping {} becasue it already exists'.format(fileName))
                         continue
                     try:
                         array = self[resolutionLevel,time,color,layer,cropYX[0]:cropYX[1],cropYX[2]:cropYX[3]]
                     except:
                         failed.append((resolutionLevel,time,color,layer,cropYX[0],cropYX[1],cropYX[2],cropYX[3]))
                         continue
-                    print('Saving: {}'.format(fileName))
+                    if self.verbose: print('Saving: {}'.format(fileName))
                     io.imsave(fileName, array, check_contrast=False)
         
         if len(failed) > 0:
-            print('Failed to extract the following layers:')
-            print(failed)
+            if self.verbose: print('Failed to extract the following layers:')
+            if self.verbose: print(failed)
         else:
-            print('All layers have been extracted')
+            if self.verbose: print('All layers have been extracted')
 
     def save_multilayer_tiff_stack(self, location=None, time_point=0, channel=0, resolution_level=0):
         """
@@ -676,6 +675,6 @@ class ims_reader:
                     z_plane = self[resolution_level, time_point, channel, layer, :, :]
                     output_array[layer, :, :] = z_plane
                 except Exception as e:
-                    print(f'Failed to extract layer {layer}: {e}')
+                    if self.verbose: print(f'Failed to extract layer {layer}: {e}')
 
         io.imsave(location, output_array, check_contrast=False)
