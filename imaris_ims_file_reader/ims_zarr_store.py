@@ -52,7 +52,6 @@ from numcodecs.compat import (
     ensure_text,
     ensure_contiguous_ndarray
 )
-# from numcodecs.registry import codec_registry
 
 
 from zarr.util import (buffer_size, json_loads, nolock, normalize_chunks,
