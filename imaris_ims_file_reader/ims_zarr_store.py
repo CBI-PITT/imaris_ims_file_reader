@@ -69,7 +69,7 @@ class ims_zarr_store(Store):
     Zarr storage adapter for reading IMS files
     """
 
-    def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=True, mode='r'):
+    def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=False, mode='r'):
 
         # guard conditions
         assert os.path.splitext(ims_file)[-1].lower() == '.ims'
@@ -119,7 +119,7 @@ class ims_zarr_store(Store):
         return index
     
     def _fromfile(self,index):
-        print(index)
+        if self.verbose: print(index)
         array = self.ims[
             self.ResolutionLevelLock,
             index[0][0]:index[0][1],
@@ -128,9 +128,8 @@ class ims_zarr_store(Store):
             index[3][0]:index[3][1],
             index[4][0]:index[4][1]
             ]
-        print(array.shape)
+        if self.verbose: print(array.shape)
         if array.shape == self.chunks:
-            print(True)
             return array
         else:
             canvas = np.zeros(self.chunks,dtype=array.dtype)
@@ -205,8 +204,6 @@ class ims_zarr_store(Store):
             print('GET : {}'.format(key))
         
         dset = self._dset_from_dirStoreFilePath(key)
-        # print(file)
-        # print(dset)
         
         try:
             if dset is None:
@@ -226,7 +223,6 @@ class ims_zarr_store(Store):
         
         if self.verbose:
             print('SET : {}'.format(key))
-            # print('SET VALUE : {}'.format(value))
         
         pass
 
@@ -238,7 +234,7 @@ class ims_zarr_store(Store):
         '''
         
         
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('__delitem__')
             print('DEL : {}'.format(key))
         
@@ -246,20 +242,18 @@ class ims_zarr_store(Store):
 
     def __contains__(self, key):
         
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('__contains__')
             print('CON : {}'.format(key))
         
         dset = self._dset_from_dirStoreFilePath(key)
-        # print(file)
-        # print(dset)
         
         
         
         if dset == '.zarray':
             return True
                 
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('Store does not contain {}'.format(key))
             
         if dset is None:
@@ -272,7 +266,7 @@ class ims_zarr_store(Store):
     
     
     def keys(self):
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('keys')
         if os.path.exists(self.path):
             yield from self._keys_fast()
@@ -287,7 +281,7 @@ class ims_zarr_store(Store):
         
         Only returns relative paths to store
         '''
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('_keys_fast')
         yield '.zarray'
         chunk_num = []
@@ -308,12 +302,12 @@ class ims_zarr_store(Store):
 
 
     def __iter__(self):
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('__iter__')
         return self.keys()
 
     def __len__(self):
-        if self.verbose == 2:
+        if self.verbose > 1:
             print('__len__')
         return len(self.keys())
 
