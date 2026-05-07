@@ -1,313 +1,256 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Tue Jul 19 10:29:42 2022
+"""Zarr v3 store adapter for reading IMS files."""
 
-@author: awatson
-"""
-
-'''
-A Zarr store that uses HDF5 as a containiner to shard chunks accross a single
-axis.  The store is implemented similar to a directory store 
-but on axis[-3] HDF5 files are written which contain
-chunks cooresponding to the remainining axes.  If the shape of the 
-the array are less than 3 axdes, the shards will be accross axis0
-
-Example:
-    array.shape = (1,1,200,10000,10000)
-    /root/of/array/.zarray
-    #Sharded h5 container at axis[-3]
-    /root/of/array/0/0/4.hf
-    
-    4.hf contents:
-        key:value
-        0.0:bit-string
-        0.1:bit-string
-        4.6:bit-string
-        ...
-        ...
-'''
-
-
-import os
-import h5py
-import hdf5plugin
-import shutil
-import time
-import numpy as np
-import json
+import asyncio
 import itertools
+import os
+import sys
+import logging
+from collections.abc import AsyncIterator, Iterable
 
-from zarr.errors import (
-    MetadataError,
-    BadCompressorError,
-    ContainsArrayError,
-    ContainsGroupError,
-    FSPathExistNotDir,
-    ReadOnlyError,
+import numpy as np
+import zarr
+from zarr.abc.store import (
+    ByteRequest,
+    OffsetByteRequest,
+    RangeByteRequest,
+    Store,
+    SuffixByteRequest,
 )
+from zarr.core.buffer import Buffer, BufferPrototype, default_buffer_prototype
 
-from numcodecs.abc import Codec
-from numcodecs.compat import (
-    ensure_bytes,
-    ensure_text,
-    ensure_contiguous_ndarray
-)
-
-
-from zarr.util import (buffer_size, json_loads, nolock, normalize_chunks,
-                       normalize_dimension_separator,
-                       normalize_dtype, normalize_fill_value, normalize_order,
-                       normalize_shape, normalize_storage_path, retry_call)
-
-from zarr._storage.absstore import ABSStore  # noqa: F401
-
-from zarr._storage.store import Store
 import imaris_ims_file_reader as ims
 
+logger = logging.getLogger(__name__)
+
+
 class ims_zarr_store(Store):
-    """
-    Zarr storage adapter for reading IMS files
-    """
+    """Zarr v3 store adapter for reading IMS files."""
 
-    def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=False, mode='r'):
+    PARTIAL_READ_BATCH_SIZE: int = 64
 
-        # guard conditions
-        assert os.path.splitext(ims_file)[-1].lower() == '.ims'
-        # if os.path.exists(path) and not os.path.isdir(path):
-        #     raise FSPathExistNotDir(path)
+    __hash__ = None
+
+    supports_writes: bool = False
+    supports_deletes: bool = False
+    supports_listing: bool = True
+
+    def __init__(
+        self,
+        ims_file,
+        ResolutionLevelLock=0,
+        writeable=False,
+        normalize_keys=True,
+        verbose=False,
+        mode="r",
+    ):
+        super().__init__(read_only=True)
+
+        assert os.path.splitext(ims_file)[-1].lower() == ".ims"
 
         self.path = ims_file
         self.ResolutionLevelLock = ResolutionLevelLock
         self.normalize_keys = normalize_keys
-        self.verbose = verbose #bool or int >= 1
+        self.verbose = verbose
         self.writeable = writeable
-        self._files = ['.zarray','.zgroup','.zattrs','.zmetadata']
+
         self.ims = self.open_ims()
         self.ResolutionLevels = self.ims.ResolutionLevels
-        
         self.TimePoints = self.ims.TimePoints
         self.Channels = self.ims.Channels
         self.chunks = self.ims.chunks
         self.shape = self.ims.shape
-        self.dtype = self.ims.dtype
+        try:
+            self.dtype = np.dtype(self.ims.dtype)
+        except TypeError as exc:
+            raise TypeError(f"Unsupported IMS dtype: {self.ims.dtype!r}") from exc
         self.ndim = self.ims.ndim
-    
+
+        self._zarr_json = self._build_zarr_json()
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ims_zarr_store) and self.path == other.path and self.ResolutionLevelLock == other.ResolutionLevelLock
+
     def open_ims(self):
-        return ims.ims(self.path,
-                            ResolutionLevelLock=self.ResolutionLevelLock,
-                            write=self.writeable,squeeze_output=False)
-        
-        
-    def _normalize_key(self, key):
+        return ims.ims(
+            self.path,
+            ResolutionLevelLock=self.ResolutionLevelLock,
+            write=self.writeable,
+            squeeze_output=False,
+        )
+
+    def _normalize_key(self, key: str) -> str:
         return key.lower() if self.normalize_keys else key
-    
-    def _get_pixel_index_from_key(self,key):
-        '''
-        Key is expected to be 5 dims
-        Function returns a slice in pixel coordinates for the provided key
-        '''
-        key_split = key.split('.')
-        key_split = [int(x) for x in key_split]
-        
+
+    def _build_zarr_json(self) -> bytes:
+        metadata_store: dict[str, Buffer] = {}
+        if self.dtype.byteorder in ("<", "|"):
+            endian = "little"
+        elif self.dtype.byteorder == ">":
+            endian = "big"
+        elif self.dtype.byteorder == "=":
+            endian = sys.byteorder
+        else:
+            raise ValueError(f"Unsupported dtype byteorder: {self.dtype.byteorder!r}")
+
+        zarr.open_array(
+            store=metadata_store,
+            mode="w",
+            zarr_format=3,
+            shape=self.shape,
+            chunks=self.chunks,
+            dtype=self.dtype,
+            fill_value=0,
+            chunk_key_encoding=("v2", "."),
+            codecs=[{"name": "bytes", "configuration": {"endian": endian}}],
+        )
+
+        return metadata_store["zarr.json"].to_bytes()
+
+    @staticmethod
+    def _apply_byte_range(data: bytes, byte_range: ByteRequest | None) -> bytes:
+        if byte_range is None:
+            return data
+        if isinstance(byte_range, RangeByteRequest):
+            return data[byte_range.start : byte_range.end]
+        if isinstance(byte_range, OffsetByteRequest):
+            return data[byte_range.offset :]
+        if isinstance(byte_range, SuffixByteRequest):
+            return data[-byte_range.suffix :]
+        return data
+
+    def _chunk_index_from_key(self, key: str) -> list[tuple[int, int]]:
+        try:
+            key_split = [int(x) for x in key.split(".")]
+        except ValueError as exc:
+            raise ValueError(f"Invalid chunk key format: {key!r}; expected dot-separated integer indices") from exc
         index = []
-        for idx,key_idx in enumerate(key_split):
-            Start = self.chunks[idx] * key_idx
-            Stop = Start + self.chunks[idx]
-            Stop = Stop if Stop < self.shape[idx] else self.shape[idx]
-            index.append((Start,Stop))
-        
+        for axis, chunk_idx in enumerate(key_split):
+            start = self.chunks[axis] * chunk_idx
+            stop = min(start + self.chunks[axis], self.shape[axis])
+            index.append((start, stop))
         return index
-    
-    def _fromfile(self,index):
-        if self.verbose: print(index)
+
+    def _chunk_bytes(self, index: list[tuple[int, int]]) -> bytes:
         array = self.ims[
             self.ResolutionLevelLock,
-            index[0][0]:index[0][1],
-            index[1][0]:index[1][1],
-            index[2][0]:index[2][1],
-            index[3][0]:index[3][1],
-            index[4][0]:index[4][1]
-            ]
-        if self.verbose: print(array.shape)
-        if array.shape == self.chunks:
-            return array
-        else:
-            canvas = np.zeros(self.chunks,dtype=array.dtype)
+            index[0][0] : index[0][1],
+            index[1][0] : index[1][1],
+            index[2][0] : index[2][1],
+            index[3][0] : index[3][1],
+            index[4][0] : index[4][1],
+        ]
+
+        if tuple(array.shape) != tuple(self.chunks):
+            canvas = np.zeros(self.chunks, dtype=array.dtype)
             canvas[
-                0:array.shape[0],
-                0:array.shape[1],
-                0:array.shape[2],
-                0:array.shape[3],
-                0:array.shape[4]
-                ] = array
-            return canvas
-    
-    
-    def _get_zarray(self):
-        
-        if self.dtype == 'uint16':
-            dtype = "<u2"
-        elif self.dtype == 'uint8':
-            dtype = "|u1"
-        elif self.dtype == 'float32':
-            dtype = "<f4"
-        elif self.dtype == float:
-            dtype = "<f8"
-        
-        zarray = {
-        "chunks": [
-            *self.chunks
-        ],
-        "compressor": None,
-        "dtype": dtype,
-        "fill_value": 0.0,
-        "filters": None,
-        "order": "C",
-        "shape": [
-            *self.shape
-        ],
-        "zarr_format": 2
-        }
-        return json.dumps(zarray, indent=2).encode('utf-8')
-    
-    
-    def _tofile(self,key, data, file):
-        """ Write data to a file
-        """
-        pass
-    
-    def _dset_from_dirStoreFilePath(self,key):
-        '''
-        filepath will include self.path + key ('0.1.2.3.4')
-        Chunks will be sharded along the axis[-3] if the length is >= 3
-        Otherwise chunks are sharded along axis 0.
-        Key stored in the h5 file is the full key for each chunk ('0.1.2.3.4')
-        '''
-        
-        _ , key = os.path.split(key)
-        
-        key = self._normalize_key(key)
-        
-        if key in self._files:
-            if key=='.zarray':
-                return '.zarray'
-            else:
-                return None
-        else:
-            return key
-        
-    
-    
-    def __getitem__(self, key):
-        
-        if self.verbose:
-            print('GET : {}'.format(key))
-        
-        dset = self._dset_from_dirStoreFilePath(key)
-        
+                0 : array.shape[0],
+                0 : array.shape[1],
+                0 : array.shape[2],
+                0 : array.shape[3],
+                0 : array.shape[4],
+            ] = array
+            array = canvas
+
+        return np.ascontiguousarray(array).tobytes(order="C")
+
+    async def get(
+        self,
+        key: str,
+        prototype: BufferPrototype | None = None,
+        byte_range: ByteRequest | None = None,
+    ) -> Buffer | None:
+        if prototype is None:
+            prototype = default_buffer_prototype()
+
+        normalized_key = self._normalize_key(key)
+
+        if normalized_key == "zarr.json":
+            return prototype.buffer.from_bytes(
+                self._apply_byte_range(self._zarr_json, byte_range)
+            )
+
         try:
-            if dset is None:
-                raise KeyError(key)
-            if dset == '.zarray':
-                return self._get_zarray()
-            else:
-                index = self._get_pixel_index_from_key(dset)
-                return self._fromfile(index)
-        except:
-            raise KeyError(key)
-        
+            chunk_index = self._chunk_index_from_key(normalized_key)
+        except (ValueError, IndexError):
+            logger.debug("Invalid chunk key requested: %s", key)
+            return None
 
-    def __setitem__(self, key, value):
-        
-        # key = self._normalize_key(key)
-        
-        if self.verbose:
-            print('SET : {}'.format(key))
-        
-        pass
+        data = self._chunk_bytes(chunk_index)
+        return prototype.buffer.from_bytes(self._apply_byte_range(data, byte_range))
 
-    def __delitem__(self, key):
-        
-        '''
-        Does not yet handle situation where directorystore path is provided
-        as the key.
-        '''
-        
-        
-        if self.verbose > 1:
-            print('__delitem__')
-            print('DEL : {}'.format(key))
-        
-        pass
+    async def get_partial_values(
+        self,
+        prototype: BufferPrototype,
+        key_ranges: Iterable[tuple[str, ByteRequest | None]],
+    ) -> list[Buffer | None]:
+        results: list[Buffer | None] = []
+        key_ranges_iter = iter(key_ranges)
+        batch_size = self.PARTIAL_READ_BATCH_SIZE
 
-    def __contains__(self, key):
-        
-        if self.verbose > 1:
-            print('__contains__')
-            print('CON : {}'.format(key))
-        
-        dset = self._dset_from_dirStoreFilePath(key)
-        
-        
-        
-        if dset == '.zarray':
+        while True:
+            batch = list(itertools.islice(key_ranges_iter, batch_size))
+            if not batch:
+                break
+            tasks = [
+                self.get(key, prototype=prototype, byte_range=byte_range)
+                for key, byte_range in batch
+            ]
+            results.extend(await asyncio.gather(*tasks))
+
+        return results
+
+    async def exists(self, key: str) -> bool:
+        normalized_key = self._normalize_key(key)
+        if normalized_key == "zarr.json":
             return True
-                
-        if self.verbose > 1:
-            print('Store does not contain {}'.format(key))
-            
-        if dset is None:
+        try:
+            _ = self._chunk_index_from_key(normalized_key)
+            return True
+        except (ValueError, IndexError):
             return False
-        
-        return True
-    
-    def __enter__(self):
-        return self
-    
-    
-    def keys(self):
-        if self.verbose > 1:
-            print('keys')
-        if os.path.exists(self.path):
-            yield from self._keys_fast()
-            
-            
-    def _keys_fast(self):
-        '''
-        This will inspect each h5 file and yield keys in the form of paths.
-        
-        The paths must be translated into h5_file, key using the function:
-            self._dset_from_dirStoreFilePath
-        
-        Only returns relative paths to store
-        '''
-        if self.verbose > 1:
-            print('_keys_fast')
-        yield '.zarray'
+
+    async def set(self, key: str, value: Buffer) -> None:
+        self._check_writable()
+
+    async def delete(self, key: str) -> None:
+        self._check_writable()
+
+    async def list(self) -> AsyncIterator[str]:
+        yield "zarr.json"
+        for key in self._iter_chunk_keys():
+            yield key
+
+    async def list_prefix(self, prefix: str) -> AsyncIterator[str]:
+        async for key in self.list():
+            if key.startswith(prefix):
+                yield key
+
+    async def list_dir(self, prefix: str) -> AsyncIterator[str]:
+        prefix = prefix.rstrip("/")
+        if prefix == "":
+            yield "zarr.json"
+            return
+
+        async for key in self.list_prefix(prefix + "/"):
+            remainder = key[len(prefix) + 1 :]
+            if remainder:
+                yield remainder.split("/", 1)[0]
+
+    def _iter_chunk_keys(self):
+        """Yield all chunk keys for the current IMS array using dot-separated indices."""
         chunk_num = []
-        for idx in range(5):
-           tmp = self.shape[idx]//self.chunks[idx]
-           tmp = tmp if self.shape[idx]%self.chunks[idx] == 0 else tmp+1
-           chunk_num.append(tmp)
-        
-        for t,c,z,y,x in itertools.product(
-                range(chunk_num[0]),
-                range(chunk_num[1]),
-                range(chunk_num[2]),
-                range(chunk_num[3]),
-                range(chunk_num[4])
-                ):
-            
-            yield '{}.{}.{}.{}.{}'.format(t,c,z,y,x)
+        for axis in range(5):
+            count = self.shape[axis] // self.chunks[axis]
+            if self.shape[axis] % self.chunks[axis] != 0:
+                count += 1
+            chunk_num.append(count)
 
-
-    def __iter__(self):
-        if self.verbose > 1:
-            print('__iter__')
-        return self.keys()
-
-    def __len__(self):
-        if self.verbose > 1:
-            print('__len__')
-        return len(self.keys())
-
+        for t, c, z, y, x in itertools.product(
+            range(chunk_num[0]),
+            range(chunk_num[1]),
+            range(chunk_num[2]),
+            range(chunk_num[3]),
+            range(chunk_num[4]),
+        ):
+            yield f"{t}.{c}.{z}.{y}.{x}"

@@ -25,7 +25,7 @@ def test(tmp_path='brain_crop3.ims'):
 
     # Will it open as a zarr store?
     store = ims(path, aszarr=True)
-    zarray = zarr.open(store)
+    zarray = zarr.open_array(store=store, mode="r")
     array = zarray[0,0,:,:,:]
     assert isinstance(array, np.ndarray)
     

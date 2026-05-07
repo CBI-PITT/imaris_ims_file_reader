@@ -64,7 +64,7 @@ print(store.chunks)
 print(store.dtype)
 print(store.ndim)
 
-zarray = zarr.open(store,mode='r')
+zarray = zarr.open_array(store=store, mode='r')
 print(store.shape)
 print(store.chunks)
 print(store.dtype)
