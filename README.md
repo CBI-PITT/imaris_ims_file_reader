@@ -74,6 +74,45 @@ print(zarray[0,0,0].shape)
 #(1024,1024)
 ```
 
+The `aszarr=True` store supports both Zarr 2 and Zarr 3 Python packages:
+
+- With `zarr>=2,<3`, Zarr uses the older synchronous mapping-style store API.
+- With `zarr>=3,<=3.1.5`, Zarr uses the newer asynchronous store API internally. Normal synchronous user code still works with `zarr.open(store, mode='r')`.
+
+The store exposes the IMS data as a Zarr **format 2** array (`.zarray` metadata with `"zarr_format": 2`) for compatibility. This is true even when using the Zarr 3 Python package. It does not currently expose native Zarr format 3 metadata (`zarr.json`).
+
+```python
+from imaris_ims_file_reader.ims import ims
+import zarr
+
+store = ims(myFile.ims, aszarr=True)
+zarray = zarr.open(store, mode='r')
+
+print(zarray.shape)
+print(zarray.chunks)
+print(zarray.dtype)
+
+# Zarr arrays use axes (t, c, z, y, x)
+data = zarray[0, 0, 0:10, :, :]
+```
+
+Zarr 3 users who are already working in an async application can also use the async API directly:
+
+```python
+import asyncio
+import zarr.api.asynchronous as async_zarr
+from imaris_ims_file_reader.ims import ims
+
+async def main():
+    store = ims(myFile.ims, aszarr=True)
+    zarray = await async_zarr.open(store=store, mode='r')
+    data = await zarray.getitem((0, 0, slice(0, 10), slice(None), slice(None)))
+    store.close()
+    return data
+
+data = asyncio.run(main())
+```
+
 
 
 #### Change Log:
@@ -107,3 +146,8 @@ Bug Fix:  Issue #4, get_Volume_At_Specific_Resolution does not extract the desir
 -Added option 'resolution_decimal_places' which enables the user to choose the number of decimal places to round resolutions (default:3).  'None' will NOT round the output.
 
 -Added a new ims convenience function.  This aims to be a drop in replacement with all previous versions of the library, but adds an 'aszarr' option.  If aszarr=True (default:False), the object returned is a zarr store.  zarr.open(store,mode='r') to interact with the array.
+
+**Unreleased:**
+
+-Added compatibility for Zarr Python 3 while preserving Zarr 2 support for `ims(..., aszarr=True)`.
+-The Zarr store still exposes Zarr format 2 metadata, but now implements the Zarr 3 async store methods used by `zarr>=3`.
