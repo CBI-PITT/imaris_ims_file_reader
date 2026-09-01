@@ -8,13 +8,13 @@ import warnings
 from skimage import io, img_as_float32, img_as_uint, img_as_ubyte
 from skimage.transform import rescale
 
-# Convienence Function:  Will handle opening as a ims_reader class or zarr store based on the aszarr:Bool
+# Convenience Function:  Will handle opening as a ims_reader class or zarr store based on the aszarr:Bool
 def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
              resolution_decimal_places = 3, 
-             aszarr=False, verbose=False):
+             aszarr=False, verbose=False, swmr=True):
     if aszarr:
         from imaris_ims_file_reader import ims_zarr_store
-        return ims_zarr_store.ims_zarr_store(file,ResolutionLevelLock=ResolutionLevelLock, verbose=verbose)
+        return ims_zarr_store.ims_zarr_store(file,ResolutionLevelLock=ResolutionLevelLock, verbose=verbose, swmr=swmr)
     else:
         return ims_reader(
             file, ResolutionLevelLock=ResolutionLevelLock, 
@@ -24,7 +24,8 @@ def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=
             disk_size=disk_size, 
             squeeze_output=squeeze_output,
             resolution_decimal_places=resolution_decimal_places,
-            verbose=verbose
+            verbose=verbose,
+            swmr=swmr
             )
     
     
@@ -33,7 +34,7 @@ def ims(file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=
 class ims_reader:
     
     def __init__(self, file, ResolutionLevelLock=0, write=False, cache_location=None, mem_size=None, disk_size=2000, squeeze_output=True,
-                 resolution_decimal_places = 3, verbose=False
+                 resolution_decimal_places = 3, verbose=False, swmr=True
                  ):
         
         ##  mem_size = in gigabytes that remain FREE as cache fills
@@ -43,6 +44,9 @@ class ims_reader:
         self.filePathComplete = file
         self.write = write
         self.verbose = verbose
+        self.swmr = swmr
+        self.hf = None
+        self.dataset = None
         self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -187,11 +191,21 @@ class ims_reader:
     def open(self):
         if self.write == False:
             if self.verbose: print('Opening readonly file: {} \n'.format(self.filePathComplete))
-            self.hf = h5py.File(self.filePathComplete, 'r', swmr=True)
+            try:
+                self.hf = h5py.File(self.filePathComplete, 'r', swmr=self.swmr)
+            except OSError as e:
+                if self.swmr:
+                    warnings.warn(
+                        'Failed to open with swmr=True ({}); '
+                        'retrying with swmr=False'.format(e)
+                    )
+                    self.hf = h5py.File(self.filePathComplete, 'r', swmr=False)
+                else:
+                    raise
             self.dataset = self.hf['DataSet']
         elif self.write == True:
             if self.verbose: print('Opening writeable file: {} \n'.format(self.filePathComplete))
-            self.hf = h5py.File(self.filePathComplete, 'a', swmr=True)
+            self.hf = h5py.File(self.filePathComplete, 'a', swmr=self.swmr)
             self.dataset = self.hf['DataSet']
     
     def __del__(self):
@@ -199,12 +213,14 @@ class ims_reader:
     
     def close(self):
         ## Implement flush?
+        hf = getattr(self, 'hf', None)
         if self.write == True:
             if self.verbose: print('Flushing Buffers to Disk')
-            self.hf.flush()
+            if hf is not None:
+                hf.flush()
         if self.verbose: print('Closing file: {} \n'.format(self.filePathComplete))
-        if self.hf is not None:
-            self.hf.close()
+        if hf is not None:
+            hf.close()
         self.hf = None
         self.dataset = None
 

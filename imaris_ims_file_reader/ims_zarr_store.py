@@ -69,7 +69,7 @@ class ims_zarr_store(Store):
     Zarr storage adapter for reading IMS files
     """
 
-    def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=False, mode='r'):
+    def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=False, mode='r', swmr=True):
 
         # guard conditions
         assert os.path.splitext(ims_file)[-1].lower() == '.ims'
@@ -81,6 +81,7 @@ class ims_zarr_store(Store):
         self.normalize_keys = normalize_keys
         self.verbose = verbose #bool or int >= 1
         self.writeable = writeable
+        self.swmr = swmr
         self._files = ['.zarray','.zgroup','.zattrs','.zmetadata']
         self.ims = self.open_ims()
         self.ResolutionLevels = self.ims.ResolutionLevels
@@ -95,7 +96,8 @@ class ims_zarr_store(Store):
     def open_ims(self):
         return ims.ims(self.path,
                             ResolutionLevelLock=self.ResolutionLevelLock,
-                            write=self.writeable,squeeze_output=False)
+                            write=self.writeable,squeeze_output=False,
+                            swmr=self.swmr)
         
         
     def _normalize_key(self, key):
