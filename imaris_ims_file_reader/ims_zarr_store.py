@@ -29,47 +29,36 @@ Example:
 
 
 import os
-import h5py
-import hdf5plugin
-import shutil
-import time
 import numpy as np
 import json
 import itertools
 
-from zarr.errors import (
-    MetadataError,
-    BadCompressorError,
-    ContainsArrayError,
-    ContainsGroupError,
-    FSPathExistNotDir,
-    ReadOnlyError,
-)
+try:
+    from zarr.abc.store import Store
+    from zarr.core.buffer.core import default_buffer_prototype
 
-from numcodecs.abc import Codec
-from numcodecs.compat import (
-    ensure_bytes,
-    ensure_text,
-    ensure_contiguous_ndarray
-)
+    ZARR_V3 = True
+except ImportError:  # pragma: no cover - exercised only with zarr<3
+    from zarr._storage.store import Store
 
+    default_buffer_prototype = None
+    ZARR_V3 = False
 
-from zarr.util import (buffer_size, json_loads, nolock, normalize_chunks,
-                       normalize_dimension_separator,
-                       normalize_dtype, normalize_fill_value, normalize_order,
-                       normalize_shape, normalize_storage_path, retry_call)
-
-from zarr._storage.absstore import ABSStore  # noqa: F401
-
-from zarr._storage.store import Store
 import imaris_ims_file_reader as ims
 
 class ims_zarr_store(Store):
     """
     Zarr storage adapter for reading IMS files
     """
+    supports_consolidated_metadata = False
+    supports_deletes = False
+    supports_listing = True
+    supports_partial_writes = False
+    supports_writes = False
 
     def __init__(self, ims_file, ResolutionLevelLock = 0, writeable=False, normalize_keys=True, verbose=False, mode='r', swmr=True):
+        if ZARR_V3:
+            super().__init__(read_only=True)
 
         # guard conditions
         assert os.path.splitext(ims_file)[-1].lower() == '.ims'
@@ -92,6 +81,26 @@ class ims_zarr_store(Store):
         self.shape = self.ims.shape
         self.dtype = self.ims.dtype
         self.ndim = self.ims.ndim
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, type(self))
+            and self.path == other.path
+            and self.ResolutionLevelLock == other.ResolutionLevelLock
+            and self.normalize_keys == other.normalize_keys
+            and self.writeable == other.writeable
+        )
+
+    def with_read_only(self, read_only=True):
+        if not read_only:
+            raise NotImplementedError("ims_zarr_store is read-only")
+        return type(self)(
+            self.path,
+            ResolutionLevelLock=self.ResolutionLevelLock,
+            writeable=False,
+            normalize_keys=self.normalize_keys,
+            verbose=self.verbose,
+        )
     
     def open_ims(self):
         return ims.ims(self.path,
@@ -108,8 +117,7 @@ class ims_zarr_store(Store):
         Key is expected to be 5 dims
         Function returns a slice in pixel coordinates for the provided key
         '''
-        key_split = key.split('.')
-        key_split = [int(x) for x in key_split]
+        key_split = self._chunk_key_to_indices(key)
         
         index = []
         for idx,key_idx in enumerate(key_split):
@@ -119,6 +127,22 @@ class ims_zarr_store(Store):
             index.append((Start,Stop))
         
         return index
+
+    def _chunk_key_to_indices(self, key):
+        key_split = key.split('.')
+        if len(key_split) != self.ndim:
+            raise ValueError(key)
+
+        key_split = [int(x) for x in key_split]
+        chunk_counts = [
+            (shape + chunk - 1) // chunk
+            for shape, chunk in zip(self.shape, self.chunks)
+        ]
+        for key_idx, chunk_count in zip(key_split, chunk_counts):
+            if key_idx < 0 or key_idx >= chunk_count:
+                raise ValueError(key)
+
+        return key_split
     
     def _fromfile(self,index):
         if self.verbose: print(index)
@@ -146,15 +170,7 @@ class ims_zarr_store(Store):
     
     
     def _get_zarray(self):
-        
-        if self.dtype == 'uint16':
-            dtype = "<u2"
-        elif self.dtype == 'uint8':
-            dtype = "|u1"
-        elif self.dtype == 'float32':
-            dtype = "<f4"
-        elif self.dtype == float:
-            dtype = "<f8"
+        dtype = np.dtype(self.dtype).str
         
         zarray = {
         "chunks": [
@@ -168,6 +184,7 @@ class ims_zarr_store(Store):
         "shape": [
             *self.shape
         ],
+        "dimension_separator": ".",
         "zarr_format": 2
         }
         return json.dumps(zarray, indent=2).encode('utf-8')
@@ -200,23 +217,99 @@ class ims_zarr_store(Store):
         
     
     
-    def __getitem__(self, key):
+    def _get_value(self, key):
         
         if self.verbose:
             print('GET : {}'.format(key))
         
         dset = self._dset_from_dirStoreFilePath(key)
         
-        try:
-            if dset is None:
-                raise KeyError(key)
-            if dset == '.zarray':
-                return self._get_zarray()
-            else:
-                index = self._get_pixel_index_from_key(dset)
-                return self._fromfile(index)
-        except:
+        if dset is None:
             raise KeyError(key)
+        if dset == '.zarray':
+            return self._get_zarray()
+
+        index = self._get_pixel_index_from_key(dset)
+        return self._fromfile(index)
+
+    def __getitem__(self, key):
+        try:
+            return self._get_value(key)
+        except (KeyError, ValueError, IndexError):
+            raise KeyError(key)
+
+    def _get_bytes(self, key):
+        value = self._get_value(key)
+        if isinstance(value, np.ndarray):
+            return np.ascontiguousarray(value).tobytes(order='C')
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, memoryview):
+            return value.tobytes()
+        return bytes(value)
+
+    @staticmethod
+    def _apply_byte_range(data, byte_range):
+        if byte_range is None:
+            return data
+
+        if hasattr(byte_range, 'start') and hasattr(byte_range, 'end'):
+            return data[byte_range.start:byte_range.end]
+        if hasattr(byte_range, 'offset'):
+            return data[byte_range.offset:]
+        if hasattr(byte_range, 'suffix'):
+            return data[-byte_range.suffix:]
+
+        start, end = byte_range
+        return data[start:end]
+
+    async def _get_zarr_v3(self, key, prototype=None, byte_range=None):
+        if prototype is None:
+            prototype = default_buffer_prototype()
+        try:
+            data = self._get_bytes(key)
+        except (KeyError, ValueError, IndexError):
+            return None
+
+        data = self._apply_byte_range(data, byte_range)
+        return prototype.buffer.from_bytes(data)
+
+    def get(self, key, default=None, *, prototype=None, byte_range=None):
+        if ZARR_V3:
+            return self._get_zarr_v3(key, prototype=prototype, byte_range=byte_range)
+
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def get_partial_values(self, prototype, key_ranges=None):
+        if key_ranges is None:
+            key_ranges = prototype
+            return [
+                self._apply_byte_range(self._get_bytes(key), byte_range)
+                if key in self else None
+                for key, byte_range in key_ranges
+            ]
+
+        async def _get_partial_values_zarr_v3():
+            return [
+                await self._get_zarr_v3(key, prototype=prototype, byte_range=byte_range)
+                for key, byte_range in key_ranges
+            ]
+
+        return _get_partial_values_zarr_v3()
+
+    async def exists(self, key):
+        return key in self
+
+    async def set(self, key, value):
+        raise NotImplementedError("ims_zarr_store is read-only")
+
+    async def delete(self, key):
+        raise NotImplementedError("ims_zarr_store is read-only")
         
 
     def __setitem__(self, key, value):
@@ -260,11 +353,26 @@ class ims_zarr_store(Store):
             
         if dset is None:
             return False
-        
+
+        try:
+            self._chunk_key_to_indices(dset)
+        except (TypeError, ValueError):
+            return False
+
         return True
     
     def __enter__(self):
         return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        if getattr(self, 'ims', None) is not None:
+            self.ims.close()
+            self.ims = None
+        if ZARR_V3:
+            super().close()
     
     
     def keys(self):
@@ -308,8 +416,29 @@ class ims_zarr_store(Store):
             print('__iter__')
         return self.keys()
 
+    async def list(self):
+        for key in self.keys():
+            yield key
+
+    async def list_prefix(self, prefix):
+        for key in self.keys():
+            if key.startswith(prefix):
+                yield key
+
+    async def list_dir(self, prefix):
+        prefix = prefix.rstrip('/')
+        prefix = prefix + '/' if prefix else ''
+
+        seen = set()
+        for key in self.keys():
+            if not key.startswith(prefix):
+                continue
+            entry = key[len(prefix):].split('/')[0]
+            if entry and entry not in seen:
+                seen.add(entry)
+                yield entry
+
     def __len__(self):
         if self.verbose > 1:
             print('__len__')
-        return len(self.keys())
-
+        return sum(1 for _ in self.keys())
