@@ -1,6 +1,9 @@
+import gc
 import os
+import sys
 from imaris_ims_file_reader.ims import ims
 import numpy as np
+import pytest
 import zarr
 
 
@@ -29,3 +32,20 @@ def test(tmp_path='brain_crop3.ims'):
     array = zarray[0,0,:,:,:]
     assert isinstance(array, np.ndarray)
     
+
+
+def test_failed_open_raises_cleanly(tmp_path):
+    # A file that is not HDF5 (e.g. an IMS3 .ims, which is a TIFF container)
+    path = tmp_path / 'not_hdf5.ims'
+    path.write_bytes(b'II*\x00' + b'\x00' * 60)
+    unraisable = []
+    old_hook = sys.unraisablehook
+    sys.unraisablehook = unraisable.append
+    try:
+        with pytest.raises(OSError):
+            ims(str(path))
+        gc.collect()
+    finally:
+        sys.unraisablehook = old_hook
+    # close() in __del__ must not fail on the half-constructed reader
+    assert unraisable == []

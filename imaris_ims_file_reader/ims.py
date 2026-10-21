@@ -43,6 +43,7 @@ class ims_reader:
         self.filePathComplete = file
         self.write = write
         self.verbose = verbose
+        self.hf = None
         self.open()
         self.filePathBase = os.path.split(file)[0]
         self.fileName = os.path.split(file)[1]
@@ -199,7 +200,7 @@ class ims_reader:
     
     def close(self):
         ## Implement flush?
-        if self.write == True:
+        if self.write == True and self.hf is not None:
             if self.verbose: print('Flushing Buffers to Disk')
             self.hf.flush()
         if self.verbose: print('Closing file: {} \n'.format(self.filePathComplete))
