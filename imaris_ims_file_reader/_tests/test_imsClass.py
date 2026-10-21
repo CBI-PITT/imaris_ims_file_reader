@@ -29,3 +29,14 @@ def test(tmp_path='brain_crop3.ims'):
     array = zarray[0,0,:,:,:]
     assert isinstance(array, np.ndarray)
     
+
+
+def test_resolution_rounding_does_not_compound(tmp_path='brain_crop3.ims'):
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)),tmp_path)
+    exact = ims(path, resolution_decimal_places=None)
+    rounded = ims(path, resolution_decimal_places=3)
+
+    # Every resolution level is rounded once from its exact value
+    for r in range(exact.ResolutionLevels):
+        expected = tuple(round(x, 3) for x in exact.metaData[r, 0, 0, 'resolution'])
+        assert rounded.metaData[r, 0, 0, 'resolution'] == expected

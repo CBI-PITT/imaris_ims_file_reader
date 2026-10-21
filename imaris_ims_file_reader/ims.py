@@ -95,6 +95,8 @@ class ims_reader:
         self.dtype = data.dtype
         self.shapeH5Array = data.shape
 
+        # Unrounded resolution per level, so rounding is applied once and not compounded across levels
+        unroundedResolution = {}
         for r, t, c in itertools.product(range(self.ResolutionLevels), range(self.TimePoints),
                                          range(self.Channels)):
 
@@ -111,19 +113,19 @@ class ims_reader:
             )
 
             if r == 0:
-                self.metaData[r, t, c, 'resolution'] = tuple(self.resolution)
+                unroundedResolution[r, t, c] = tuple(self.resolution)
             else:
                 # Determine if sampling is 1x or 2x for each dimension based on the adjacent resolution level shape
                 # Use this sampling factor to calculate resolution at the current resolution level
                 sampling = [x//y for x,y in zip(self.metaData[r-1, t, c, 'shape'], self.metaData[r, t, c, 'shape'])]
                 sampling = sampling[2:]
-                self.metaData[r, t, c, 'resolution'] = tuple(
-                    [float(x*y) for x,y in zip(sampling, self.metaData[r-1, t, c, 'resolution'])]
+                unroundedResolution[r, t, c] = tuple(
+                    [float(x*y) for x,y in zip(sampling, unroundedResolution[r-1, t, c])]
                 )
             
             #Round Resolution if resolution_decimal_places is specified
             self.metaData[r, t, c, 'resolution'] = tuple(
-                [round(x,self.resolution_decimal_places) if self.resolution_decimal_places is not None else x for x in self.metaData[r, t, c, 'resolution']]
+                [round(x,self.resolution_decimal_places) if self.resolution_decimal_places is not None else x for x in unroundedResolution[r, t, c]]
                 )
             
             try:
